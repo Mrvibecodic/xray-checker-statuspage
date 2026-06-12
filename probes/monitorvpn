@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# monitorvpn — управление probe-агентом xray-checker-statuspage на macOS.
+#
+#   monitorvpn start       запустить агента
+#   monitorvpn stop        остановить
+#   monitorvpn restart     перезапуск
+#   monitorvpn status      статус + последние строки лога
+#   monitorvpn logs        tail -f лога
+#   monitorvpn delete      полностью удалить (plist + ~/.xrs-probe + symlink)
+#
+set -euo pipefail
+
+LABEL="com.xrs.probe"
+PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
+LOG="${HOME}/Library/Logs/xrs-probe.log"
+APP_DIR="${HOME}/.xrs-probe"
+SYMLINK="/usr/local/bin/monitorvpn"
+
+c_g(){ printf "\033[32m%s\033[0m\n" "$*"; }
+c_y(){ printf "\033[33m%s\033[0m\n" "$*"; }
+c_r(){ printf "\033[31m%s\033[0m\n" "$*"; }
+
+domain="gui/$(id -u)"
+target="${domain}/${LABEL}"
+
+is_loaded(){ launchctl print "${target}" >/dev/null 2>&1; }
+
+usage(){
+  cat <<EOF
+monitorvpn — управление probe-агентом xray-checker-statuspage
+
+Команды:
+  monitorvpn start         запустить агент (зарегистрировать LaunchAgent)
+  monitorvpn stop          остановить
+  monitorvpn restart       перезапустить
+  monitorvpn status        показать статус и последние строки лога
+  monitorvpn logs          tail -f лог-файла
+  monitorvpn refresh       попросить сервер перечитать подписку (когда ты её обновил)
+  monitorvpn delete        полностью удалить (plist + ~/.xrs-probe/ + symlink)
+EOF
+}
+
+# Читает значения переменных окружения из plist (для refresh-команды).
+plist_env(){
+  local key="$1"
+  /usr/bin/plutil -extract "EnvironmentVariables.${key}" raw -o - "${PLIST}" 2>/dev/null
+}
+
+cmd="${1:-status}"
+
+case "${cmd}" in
+  start)
+    [ -f "${PLIST}" ] || { c_r "не найден ${PLIST}. Запусти install-macos.sh."; exit 1; }
+    if is_loaded; then
+      c_y "агент уже работает"
+      exit 0
+    fi
+    if launchctl bootstrap "${domain}" "${PLIST}" 2>/dev/null; then
+      c_g "✓ агент запущен"
+    elif launchctl load "${PLIST}" 2>/dev/null; then
+      c_g "✓ агент запущен (legacy load)"
+    else
+      c_r "не удалось загрузить LaunchAgent"
+      exit 1
+    fi
+    ;;
+  stop)
+    if ! is_loaded; then
+      c_y "агент не запущен"
+      exit 0
+    fi
+    if launchctl bootout "${target}" 2>/dev/null; then
+      c_g "✓ агент остановлен"
+    elif launchctl unload "${PLIST}" 2>/dev/null; then
+      c_g "✓ агент остановлен (legacy unload)"
+    else
+      c_r "не удалось остановить"
+      exit 1
+    fi
+    ;;
+  restart)
+    "${0}" stop || true
+    sleep 1
+    "${0}" start
+    ;;
+  status)
+    if is_loaded; then
+      c_g "✓ агент работает (label: ${LABEL})"
+    else
+      c_r "✗ агент не запущен"
+    fi
+    if [ -f "${LOG}" ]; then
+      echo
+      c_y "Последние строки лога (${LOG}):"
+      tail -n 5 "${LOG}"
+    else
+      c_y "лог-файл ещё не создан: ${LOG}"
+    fi
+    ;;
+  logs|log|tail)
+    [ -f "${LOG}" ] || { c_r "лог-файл не найден: ${LOG}"; exit 1; }
+    tail -n 30 -f "${LOG}"
+    ;;
+  refresh|reload)
+    [ -f "${PLIST}" ] || { c_r "пробник не установлен"; exit 1; }
+    URL="$(plist_env STATUSPAGE_URL)"
+    TOKEN="$(plist_env PROBE_TOKEN)"
+    [ -n "${URL}" ] && [ -n "${TOKEN}" ] || { c_r "не могу прочитать STATUSPAGE_URL/PROBE_TOKEN из plist"; exit 1; }
+    c_y "запрашиваю force-refresh подписки на сервере…"
+    RESP="$(curl -fsSL -H "X-Probe-Token: ${TOKEN}" \
+            "${URL%/}/api/probe/targets?force=1" 2>&1)" \
+      || { c_r "не удалось:\n${RESP}"; exit 1; }
+    echo "${RESP}" | /usr/bin/python3 -c '
+import sys, json, datetime as dt
+d = json.load(sys.stdin)
+n = len(d.get("targets", []))
+ts = d.get("fetchedAt", 0)
+when = dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S") if ts else "?"
+print(f"✓ сервер вернул {n} таргетов (fetchedAt={when})")
+print("  пробник подхватит обновлённый список со следующим циклом (через INTERVAL сек).")
+'
+    ;;
+  delete|uninstall|rm)
+    c_y "Удаление…"
+    is_loaded && (launchctl bootout "${target}" 2>/dev/null \
+                  || launchctl unload "${PLIST}" 2>/dev/null) || true
+    rm -f "${PLIST}"
+    rm -rf "${APP_DIR}"
+    # symlink удаляем, если на него есть права; иначе подсказка.
+    if [ -L "${SYMLINK}" ]; then
+      if rm -f "${SYMLINK}" 2>/dev/null; then
+        c_g "  символическая ссылка ${SYMLINK} удалена"
+      else
+        c_y "  не могу удалить ${SYMLINK} без sudo:"
+        echo "    sudo rm -f ${SYMLINK}"
+      fi
+    fi
+    c_g "✓ удалено. Логи остались в ${LOG} (можешь снести вручную)."
+    ;;
+  help|-h|--help|"")
+    usage
+    ;;
+  *)
+    c_r "неизвестная команда: ${cmd}"
+    echo
+    usage
+    exit 2
+    ;;
+esac

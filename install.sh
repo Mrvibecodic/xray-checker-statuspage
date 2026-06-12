@@ -22,6 +22,47 @@ ask_yn(){
 num(){ case "$1" in (''|*[!0-9]*) echo "$2";; (*) echo "$1";; esac; }
 asks(){ local p="$1" v=""; read -rsp "$p: " v </dev/tty || true; echo >&2; printf '%s' "$v"; }
 
+gen_token(){
+  openssl rand -hex 24 2>/dev/null \
+    || head -c 24 /dev/urandom 2>/dev/null | xxd -p -c 1000 2>/dev/null | tr -d '\n' \
+    || head -c 64 /dev/urandom 2>/dev/null | base64 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 48
+}
+
+read_existing_admin_token(){
+  [ -f "$1" ] || return 0
+  awk -F= '/^[[:space:]]*-[[:space:]]*ADMIN_TOKEN=/{sub(/^[[:space:]]*-[[:space:]]*ADMIN_TOKEN=/,"");print;exit}' "$1" | tr -d '[:space:]'
+}
+
+# Вписывает строку `- ADMIN_TOKEN=<token>` в блок statuspage существующего
+# docker-compose.yml — сразу после `- DB_PATH=/data/status.db`. Сохраняет отступ.
+inject_admin_token(){
+  local file="$1" token="$2" tmp
+  grep -q -- '- DB_PATH=/data/status.db' "$file" || return 1
+  tmp="$(mktemp)" || return 1
+  awk -v t="$token" '
+    {
+      print
+      if (!done && match($0, /^[[:space:]]*- DB_PATH=\/data\/status\.db[[:space:]]*$/)) {
+        indent = $0
+        sub(/-.*/, "", indent)
+        printf "%s- ADMIN_TOKEN=%s\n", indent, t
+        done = 1
+      }
+    }
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+write_admin_token_info(){
+  local token="$1"
+  if [ -f .install-info ]; then
+    grep -v '^Админ-токен' .install-info > .install-info.tmp 2>/dev/null || true
+    echo "Админ-токен (удаление записей со страницы): ${token}" >> .install-info.tmp
+    mv .install-info.tmp .install-info
+  else
+    echo "Админ-токен (удаление записей со страницы): ${token}" > .install-info
+  fi
+}
+
 [ "$(id -u)" -eq 0 ] || die "запусти от root:  sudo bash install.sh"
 
 c_g "== xray-checker-statuspage =="
@@ -50,6 +91,21 @@ cd "$INSTALL_DIR"
 if [ -f docker-compose.yml ]; then
   c_y "Найден существующий docker-compose.yml."
   if ! ask_yn "Перенастроить заново? (нет = обновить образ и перезапустить)" n; then
+    EXISTING_TOKEN="$(read_existing_admin_token docker-compose.yml)"
+    if [ -z "$EXISTING_TOKEN" ]; then
+      c_y "В docker-compose.yml нет ADMIN_TOKEN — это новая фича для ручного удаления старых записей со страницы (иконка-замок в шапке)."
+      if ask_yn "Сгенерировать и вписать ADMIN_TOKEN в docker-compose.yml?" y; then
+        NEW_TOKEN="$(gen_token)"
+        if [ -n "$NEW_TOKEN" ] && inject_admin_token docker-compose.yml "$NEW_TOKEN"; then
+          write_admin_token_info "$NEW_TOKEN"
+          c_g "ADMIN_TOKEN добавлен. Сохрани токен (он же в ${INSTALL_DIR}/.install-info):"
+          echo "  $NEW_TOKEN"
+        else
+          c_y "Не удалось автоматически вписать ADMIN_TOKEN — добавь вручную в секцию statuspage:"
+          echo "  - ADMIN_TOKEN=${NEW_TOKEN:-$(gen_token)}"
+        fi
+      fi
+    fi
     docker compose pull && docker compose up -d
     c_g "Обновлено. Текущая страница работает на прежних настройках."
     exit 0
@@ -73,6 +129,14 @@ MPASS_DEF="$(openssl rand -hex 16 2>/dev/null || echo change-me-$RANDOM)"
 MPASS="$(ask 'Пароль админки/метрик checker' "$MPASS_DEF")"
 PORT="$(ask 'Локальный порт страницы (127.0.0.1:PORT)' '8080')"
 INTERVAL="$(num "$INTERVAL" 300)"; DAYS="$(num "$DAYS" 30)"; PORT="$(num "$PORT" 8080)"
+
+ADMIN_TOKEN_PREV="$(read_existing_admin_token docker-compose.yml)"
+if [ -n "$ADMIN_TOKEN_PREV" ]; then
+  ADMIN_TOKEN="$ADMIN_TOKEN_PREV"; ADMIN_TOKEN_NEW=n
+else
+  ADMIN_TOKEN="$(gen_token)"; ADMIN_TOKEN_NEW=y
+fi
+[ -n "$ADMIN_TOKEN" ] || die "не удалось сгенерировать ADMIN_TOKEN (нет openssl/urandom/base64?)"
 
 echo
 c_y "nginx (официальный nginx.org) на портах 80/443. Если на сервере уже есть панель"
@@ -139,6 +203,7 @@ services:
       - TITLE=${TITLE}
       - SUBTITLE=${SUBTITLE}
       - DB_PATH=/data/status.db
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
     volumes:
       - ./data:/data
     ports:
@@ -265,6 +330,7 @@ fi
 
 cat > .install-info <<EOF
 Логин/пароль админки checker: ${MUSER} / ${MPASS}
+Админ-токен (удаление записей со страницы): ${ADMIN_TOKEN}
 Страница: ${PUB_URL}
 Локально: http://127.0.0.1:${PORT}
 EOF
@@ -278,5 +344,9 @@ else
   c_y "Направь на неё свою панель/прокси (proxy_pass http://127.0.0.1:${PORT})."
 fi
 echo "Админка/метрики checker под Basic Auth: ${MUSER} / ${MPASS}"
+echo "Админ-токен страницы (иконка-замок в шапке): ${ADMIN_TOKEN}"
+if [ "${ADMIN_TOKEN_NEW:-n}" = y ]; then
+  c_g "  ↑ сгенерирован автоматически — сохрани, чтобы войти в админ-режим в браузере."
+fi
 echo "Доступы сохранены в ${INSTALL_DIR}/.install-info"
 echo "Фавикон/лого: положи файл favicon.png в ${INSTALL_DIR}/data — подхватится сам."
