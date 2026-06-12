@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+# monitorvpn — управление probe-агентом xray-checker-statuspage на macOS.
+#
+#   monitorvpn start       запустить агента
+#   monitorvpn stop        остановить
+#   monitorvpn restart     перезапуск
+#   monitorvpn status      статус + последние строки лога
+#   monitorvpn logs        tail -f лога
+#   monitorvpn delete      полностью удалить (plist + ~/.xrs-probe + symlink)
+#
+set -euo pipefail
+
+LABEL="com.xrs.probe"
+PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
+LOG="${HOME}/Library/Logs/xrs-probe.log"
+APP_DIR="${HOME}/.xrs-probe"
+SYMLINK="/usr/local/bin/monitorvpn"
+AGENT_RAW_URL="https://raw.githubusercontent.com/Mrvibecodic/xray-checker-statuspage/main/probes/agent.py"
+MONITORVPN_RAW_URL="https://raw.githubusercontent.com/Mrvibecodic/xray-checker-statuspage/main/probes/monitorvpn"
+
+c_g(){ printf "\033[32m%s\033[0m\n" "$*"; }
+c_y(){ printf "\033[33m%s\033[0m\n" "$*"; }
+c_r(){ printf "\033[31m%s\033[0m\n" "$*"; }
+
+domain="gui/$(id -u)"
+target="${domain}/${LABEL}"
+
+is_loaded(){ launchctl print "${target}" >/dev/null 2>&1; }
+
+usage(){
+  cat <<EOF
+monitorvpn — управление probe-агентом xray-checker-statuspage
+
+Команды:
+  monitorvpn start         запустить агент (зарегистрировать LaunchAgent)
+  monitorvpn stop          остановить
+  monitorvpn restart       перезапустить
+  monitorvpn status        показать статус и последние строки лога
+  monitorvpn logs          tail -f лог-файла
+  monitorvpn refresh       попросить сервер перечитать подписку (когда ты её обновил)
+  monitorvpn update        обновить агент и сам monitorvpn (без переустановки/перерегистрации)
+  monitorvpn xray-update   скачать свежий xray-core последнего релиза
+  monitorvpn help          показать эту справку
+  monitorvpn delete        полностью удалить (plist + ~/.xrs-probe/ + symlink)
+EOF
+}
+
+# Читает значения переменных окружения из plist (для refresh-команды).
+plist_env(){
+  local key="$1"
+  /usr/bin/plutil -extract "EnvironmentVariables.${key}" raw -o - "${PLIST}" 2>/dev/null
+}
+
+cmd="${1:-status}"
+
+case "${cmd}" in
+  start)
+    [ -f "${PLIST}" ] || { c_r "не найден ${PLIST}. Запусти install-macos.sh."; exit 1; }
+    if is_loaded; then
+      c_y "агент уже работает"
+      exit 0
+    fi
+    if launchctl bootstrap "${domain}" "${PLIST}" 2>/dev/null; then
+      c_g "✓ агент запущен"
+    elif launchctl load "${PLIST}" 2>/dev/null; then
+      c_g "✓ агент запущен (legacy load)"
+    else
+      c_r "не удалось загрузить LaunchAgent"
+      exit 1
+    fi
+    ;;
+  stop)
+    if ! is_loaded; then
+      c_y "агент не запущен"
+      exit 0
+    fi
+    if launchctl bootout "${target}" 2>/dev/null; then
+      c_g "✓ агент остановлен"
+    elif launchctl unload "${PLIST}" 2>/dev/null; then
+      c_g "✓ агент остановлен (legacy unload)"
+    else
+      c_r "не удалось остановить"
+      exit 1
+    fi
+    ;;
+  restart)
+    "${0}" stop || true
+    sleep 1
+    "${0}" start
+    ;;
+  status)
+    if is_loaded; then
+      c_g "✓ агент работает (label: ${LABEL})"
+    else
+      c_r "✗ агент не запущен"
+    fi
+    if [ -f "${LOG}" ]; then
+      echo
+      c_y "Последние строки лога (${LOG}):"
+      tail -n 5 "${LOG}"
+    else
+      c_y "лог-файл ещё не создан: ${LOG}"
+    fi
+    ;;
+  logs|log|tail)
+    [ -f "${LOG}" ] || { c_r "лог-файл не найден: ${LOG}"; exit 1; }
+    tail -n 30 -f "${LOG}"
+    ;;
+  refresh|reload)
+    [ -f "${PLIST}" ] || { c_r "пробник не установлен"; exit 1; }
+    URL="$(plist_env STATUSPAGE_URL)"
+    TOKEN="$(plist_env PROBE_TOKEN)"
+    [ -n "${URL}" ] && [ -n "${TOKEN}" ] || { c_r "не могу прочитать STATUSPAGE_URL/PROBE_TOKEN из plist"; exit 1; }
+    c_y "запрашиваю force-refresh подписки на сервере…"
+    RESP="$(curl -fsSL -H "X-Probe-Token: ${TOKEN}" \
+            "${URL%/}/api/probe/targets?force=1" 2>&1)" \
+      || { c_r "не удалось:\n${RESP}"; exit 1; }
+    echo "${RESP}" | /usr/bin/python3 -c '
+import sys, json, datetime as dt
+d = json.load(sys.stdin)
+n = len(d.get("targets", []))
+ts = d.get("fetchedAt", 0)
+when = dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S") if ts else "?"
+print(f"✓ сервер вернул {n} таргетов (fetchedAt={when})")
+print("  пробник подхватит обновлённый список со следующим циклом (через INTERVAL сек).")
+'
+    ;;
+  update|self-update)
+    # Обновляет agent.py и сам monitorvpn до свежей версии из main-ветки на
+    # GitHub. Регистрация пробника и токен — не трогаются (они хранятся в
+    # plist). После обновления — мягкий перезапуск агента (если запущен).
+    c_y "качаю свежий agent.py…"
+    if ! curl -fL --retry 2 "${AGENT_RAW_URL}" -o "${APP_DIR}/agent.py.new"; then
+      c_r "не удалось скачать agent.py с ${AGENT_RAW_URL}"
+      rm -f "${APP_DIR}/agent.py.new"
+      exit 1
+    fi
+    # Быстрый sanity-check — заголовок shebang. Защищает от подмены на HTML 404.
+    if ! head -1 "${APP_DIR}/agent.py.new" | grep -q '^#!.*python'; then
+      c_r "скачанный agent.py не похож на python-скрипт (404? prox-перехват?)"
+      rm -f "${APP_DIR}/agent.py.new"
+      exit 1
+    fi
+    mv "${APP_DIR}/agent.py.new" "${APP_DIR}/agent.py"
+    chmod 600 "${APP_DIR}/agent.py"
+    c_g "  ✓ agent.py обновлён"
+    c_y "качаю свежий monitorvpn…"
+    if curl -fL --retry 2 "${MONITORVPN_RAW_URL}" -o "${APP_DIR}/monitorvpn.new"; then
+      if head -1 "${APP_DIR}/monitorvpn.new" | grep -q '^#!.*bash'; then
+        mv "${APP_DIR}/monitorvpn.new" "${APP_DIR}/monitorvpn"
+        chmod +x "${APP_DIR}/monitorvpn"
+        c_g "  ✓ monitorvpn обновлён"
+      else
+        c_y "  ! скачанный monitorvpn не похож на bash-скрипт — пропускаю"
+        rm -f "${APP_DIR}/monitorvpn.new"
+      fi
+    else
+      c_y "  ! не удалось скачать monitorvpn (не критично, ставится при install)"
+    fi
+    if is_loaded; then
+      c_y "перезапускаю агент, чтобы новая версия начала работать…"
+      launchctl bootout "${target}" 2>/dev/null || launchctl unload "${PLIST}" 2>/dev/null || true
+      launchctl bootstrap "${domain}" "${PLIST}" 2>/dev/null || launchctl load "${PLIST}" 2>/dev/null || true
+    fi
+    c_g "✓ обновление завершено."
+    ;;
+  xray-update|update-xray)
+    ARCH="$(uname -m)"
+    case "${ARCH}" in
+      arm64|aarch64) ZIP_NAME="Xray-macos-arm64-v8a.zip" ;;
+      x86_64|amd64)  ZIP_NAME="Xray-macos-64.zip" ;;
+      *) c_r "неизвестная архитектура: ${ARCH}"; exit 1 ;;
+    esac
+    # Пинимся на v25.12.8 (см. install-macos.sh). Override:
+    # XRAY_VERSION=latest monitorvpn xray-update
+    XRAY_VERSION="${XRAY_VERSION:-v25.12.8}"
+    if [ "${XRAY_VERSION}" = "latest" ]; then
+      URL="https://github.com/XTLS/Xray-core/releases/latest/download/${ZIP_NAME}"
+    else
+      URL="https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${ZIP_NAME}"
+    fi
+    TMP="$(mktemp -d)"
+    c_y "качаю ${URL}…"
+    if ! curl -fL --retry 2 "${URL}" -o "${TMP}/xray.zip"; then
+      c_r "не удалось скачать"; rm -rf "${TMP}"; exit 1
+    fi
+    if ! unzip -oq "${TMP}/xray.zip" xray -d "${APP_DIR}"; then
+      c_r "не удалось распаковать"; rm -rf "${TMP}"; exit 1
+    fi
+    chmod +x "${APP_DIR}/xray"
+    xattr -dr com.apple.quarantine "${APP_DIR}/xray" 2>/dev/null || true
+    rm -rf "${TMP}"
+    c_g "✓ xray обновлён: $("${APP_DIR}/xray" version 2>/dev/null | head -1 || echo 'версия неизвестна')"
+    if is_loaded; then
+      c_y "перезапускаю агент чтобы новый xray начал использоваться…"
+      launchctl bootout "${target}" 2>/dev/null || launchctl unload "${PLIST}" 2>/dev/null || true
+      launchctl bootstrap "${domain}" "${PLIST}" 2>/dev/null || launchctl load "${PLIST}" 2>/dev/null || true
+    fi
+    ;;
+  delete|uninstall|rm)
+    c_y "Удаление…"
+    is_loaded && (launchctl bootout "${target}" 2>/dev/null \
+                  || launchctl unload "${PLIST}" 2>/dev/null) || true
+    rm -f "${PLIST}"
+    rm -rf "${APP_DIR}"
+    # symlink удаляем, если на него есть права; иначе подсказка.
+    if [ -L "${SYMLINK}" ]; then
+      if rm -f "${SYMLINK}" 2>/dev/null; then
+        c_g "  символическая ссылка ${SYMLINK} удалена"
+      else
+        c_y "  не могу удалить ${SYMLINK} без sudo:"
+        echo "    sudo rm -f ${SYMLINK}"
+      fi
+    fi
+    c_g "✓ удалено. Логи остались в ${LOG} (можешь снести вручную)."
+    ;;
+  help|-h|--help|"")
+    usage
+    ;;
+  *)
+    c_r "неизвестная команда: ${cmd}"
+    echo
+    usage
+    exit 2
+    ;;
+esac

@@ -1,32 +1,32 @@
 services:
-  xray-checker:
-    image: kutovoys/xray-checker
-    container_name: xray-checker
-    restart: unless-stopped
-    environment:
-      - SUBSCRIPTION_URL=https://example.com/sub
-      - METRICS_PROTECTED=true
-      - METRICS_USERNAME=admin
-      - METRICS_PASSWORD=CHANGE_ME
-      - WEB_PUBLIC=true
-      - PROXY_CHECK_INTERVAL=300
-    ports:
-      - "127.0.0.1:2112:2112"
-
   statuspage:
     image: ghcr.io/mrvibecodic/xray-checker-statuspage:latest
     container_name: statuspage
     restart: unless-stopped
-    depends_on:
-      - xray-checker
     environment:
-      - CHECKER_URL=http://xray-checker:2112
-      - POLL_INTERVAL=300
+      # URL подписки (vless://...). Сервер сам тянет её, парсит и отдаёт
+      # пробникам — на устройствах юзеров подписка не светится.
+      # Изменения подхватываются автоматически через PROBE_TARGETS_TTL_MIN.
+      - PROBE_SUBSCRIPTION_URL=https://example.com/sub
+      # User-Agent для запроса подписки: панели смотрят на него и отдают
+      # разный формат. v2rayN/6.40 — самый универсальный, понимается всеми.
+      - PROBE_SUBSCRIPTION_USER_AGENT=v2rayN/6.40
+      # Сколько хранить кеш разобранных таргетов (минуты). По истечении —
+      # следующий запрос пробника или /api/summary тянет подписку заново.
+      - PROBE_TARGETS_TTL_MIN=10
+      # Sync подписки в `current` (имена/флаги для UI). Тот же кеш, что и
+      # PROBE_TARGETS_TTL_MIN, поэтому короткий интервал ничего не стоит.
+      - POLL_INTERVAL=60
       - DAYS=30
       - TZ=Europe/Moscow
       - TITLE=Статус серверов
       - SUBTITLE=Доступность серверов в реальном времени
       - DB_PATH=/data/status.db
+      # Раскомментируйте и задайте секрет, чтобы появилась возможность
+      # вручную удалять старые записи (дубли) со страницы статуса —
+      # кнопка-замок в шапке, × напротив каждой строки, регистрация
+      # пробников.
+      # - ADMIN_TOKEN=CHANGE_ME
     volumes:
       - ./data:/data
     ports:

@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE="ghcr.io/mrvibecodic/xray-checker-statuspage:latest"
+REPO_URL="https://github.com/Mrvibecodic/xray-checker-statuspage.git"
+# Ветка, с которой ensure_source синкает ./src. По умолчанию main, но если
+# install.sh запущен ИЗ git-клона на другой ветке — берём ту же ветку, чтобы
+# не возникало рассинхрона «верх репо на feat, а src сидит на main».
+# Override через env: REPO_BRANCH=feat/... sudo bash install.sh.
+_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -z "${REPO_BRANCH:-}" ] && [ -d "${_SELF_DIR}/.git" ]; then
+  REPO_BRANCH="$(git -C "${_SELF_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+  [ "${REPO_BRANCH}" = "HEAD" ] && REPO_BRANCH="main"
+fi
+REPO_BRANCH="${REPO_BRANCH:-main}"
+SRC_DIR_REL="src"
 INSTALL_DIR="/opt/xray-checker-statuspage"
 
 c_g(){ printf "\033[32m%s\033[0m\n" "$*"; }
@@ -21,6 +32,70 @@ ask_yn(){
 }
 num(){ case "$1" in (''|*[!0-9]*) echo "$2";; (*) echo "$1";; esac; }
 asks(){ local p="$1" v=""; read -rsp "$p: " v </dev/tty || true; echo >&2; printf '%s' "$v"; }
+
+gen_token(){
+  openssl rand -hex 24 2>/dev/null \
+    || head -c 24 /dev/urandom 2>/dev/null | xxd -p -c 1000 2>/dev/null | tr -d '\n' \
+    || head -c 64 /dev/urandom 2>/dev/null | base64 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 48
+}
+
+read_existing_admin_token(){
+  [ -f "$1" ] || return 0
+  awk -F= '/^[[:space:]]*-[[:space:]]*ADMIN_TOKEN=/{sub(/^[[:space:]]*-[[:space:]]*ADMIN_TOKEN=/,"");print;exit}' "$1" | tr -d '[:space:]'
+}
+
+# Вписывает строку `- ADMIN_TOKEN=<token>` в блок statuspage существующего
+# docker-compose.yml — сразу после `- DB_PATH=/data/status.db`. Сохраняет отступ.
+inject_admin_token(){
+  local file="$1" token="$2" tmp
+  grep -q -- '- DB_PATH=/data/status.db' "$file" || return 1
+  tmp="$(mktemp)" || return 1
+  awk -v t="$token" '
+    {
+      print
+      if (!done && match($0, /^[[:space:]]*- DB_PATH=\/data\/status\.db[[:space:]]*$/)) {
+        indent = $0
+        sub(/-.*/, "", indent)
+        printf "%s- ADMIN_TOKEN=%s\n", indent, t
+        done = 1
+      }
+    }
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+write_admin_token_info(){
+  local token="$1"
+  if [ -f .install-info ]; then
+    grep -v '^Админ-токен' .install-info > .install-info.tmp 2>/dev/null || true
+    echo "Админ-токен (удаление записей со страницы): ${token}" >> .install-info.tmp
+    mv .install-info.tmp .install-info
+  else
+    echo "Админ-токен (удаление записей со страницы): ${token}" > .install-info
+  fi
+}
+
+ensure_source(){
+  if [ -d "${SRC_DIR_REL}/.git" ]; then
+    c_g "Обновляю исходники в ./${SRC_DIR_REL}…"
+    git -C "${SRC_DIR_REL}" remote set-url origin "${REPO_URL}" >/dev/null 2>&1 || true
+    git -C "${SRC_DIR_REL}" fetch --depth 1 origin "${REPO_BRANCH}" >/dev/null 2>&1 || \
+      die "не удалось обновить ./${SRC_DIR_REL} из ${REPO_URL}"
+    git -C "${SRC_DIR_REL}" reset --hard "origin/${REPO_BRANCH}" >/dev/null 2>&1 || \
+      die "не удалось переключить ./${SRC_DIR_REL} на ${REPO_BRANCH}"
+  else
+    c_g "Клонирую исходники из ${REPO_URL} в ./${SRC_DIR_REL}…"
+    rm -rf "${SRC_DIR_REL}"
+    git clone --depth 1 --branch "${REPO_BRANCH}" "${REPO_URL}" "${SRC_DIR_REL}" >/dev/null 2>&1 || \
+      die "не удалось клонировать ${REPO_URL}"
+  fi
+}
+
+# Заменяет в compose `image: ghcr.io/...xray-checker-statuspage...` на `build: ./src`.
+migrate_image_to_build(){
+  local file="$1"
+  grep -qE '^[[:space:]]*image:[[:space:]]*ghcr\.io/[^[:space:]]*xray-checker-statuspage' "$file" || return 1
+  sed -i -E 's|^([[:space:]]*)image:[[:space:]]*ghcr\.io/[^[:space:]]*xray-checker-statuspage[^[:space:]]*$|\1build: ./'"${SRC_DIR_REL}"'|' "$file"
+}
 
 [ "$(id -u)" -eq 0 ] || die "запусти от root:  sudo bash install.sh"
 
@@ -50,7 +125,26 @@ cd "$INSTALL_DIR"
 if [ -f docker-compose.yml ]; then
   c_y "Найден существующий docker-compose.yml."
   if ! ask_yn "Перенастроить заново? (нет = обновить образ и перезапустить)" n; then
-    docker compose pull && docker compose up -d
+    EXISTING_TOKEN="$(read_existing_admin_token docker-compose.yml)"
+    if [ -z "$EXISTING_TOKEN" ]; then
+      c_y "В docker-compose.yml нет ADMIN_TOKEN — это новая фича для ручного удаления старых записей со страницы (иконка-замок в шапке)."
+      if ask_yn "Сгенерировать и вписать ADMIN_TOKEN в docker-compose.yml?" y; then
+        NEW_TOKEN="$(gen_token)"
+        if [ -n "$NEW_TOKEN" ] && inject_admin_token docker-compose.yml "$NEW_TOKEN"; then
+          write_admin_token_info "$NEW_TOKEN"
+          c_g "ADMIN_TOKEN добавлен. Сохрани токен (он же в ${INSTALL_DIR}/.install-info):"
+          echo "  $NEW_TOKEN"
+        else
+          c_y "Не удалось автоматически вписать ADMIN_TOKEN — добавь вручную в секцию statuspage:"
+          echo "  - ADMIN_TOKEN=${NEW_TOKEN:-$(gen_token)}"
+        fi
+      fi
+    fi
+    ensure_source
+    if migrate_image_to_build docker-compose.yml; then
+      c_g "docker-compose.yml переключён с готового образа на локальную сборку из ./${SRC_DIR_REL}."
+    fi
+    docker compose up -d --build || die "не удалось пересобрать/запустить контейнеры. Логи: docker compose logs"
     c_g "Обновлено. Текущая страница работает на прежних настройках."
     exit 0
   fi
@@ -60,19 +154,24 @@ echo
 c_g "--- Настройка ---"
 SUB_URL=""
 while [ -z "$SUB_URL" ]; do
-  SUB_URL="$(ask 'URL подписки (SUBSCRIPTION_URL)')"
+  SUB_URL="$(ask 'URL подписки (PROBE_SUBSCRIPTION_URL)')"
   [ -n "$SUB_URL" ] || c_y "Подписка обязательна — вставь ссылку."
 done
 TITLE="$(ask 'Заголовок страницы' 'Статус серверов')"
 SUBTITLE="$(ask 'Подзаголовок' 'Доступность серверов в реальном времени')"
-INTERVAL="$(ask 'Интервал проверки, сек' '300')"
+INTERVAL="$(ask 'Интервал sync подписки, сек' '60')"
 DAYS="$(ask 'Сколько дней истории показывать' '30')"
 TZ_VAL="$(ask 'Часовой пояс' 'Europe/Moscow')"
-MUSER="$(ask 'Логин админки/метрик checker' 'admin')"
-MPASS_DEF="$(openssl rand -hex 16 2>/dev/null || echo change-me-$RANDOM)"
-MPASS="$(ask 'Пароль админки/метрик checker' "$MPASS_DEF")"
 PORT="$(ask 'Локальный порт страницы (127.0.0.1:PORT)' '8080')"
-INTERVAL="$(num "$INTERVAL" 300)"; DAYS="$(num "$DAYS" 30)"; PORT="$(num "$PORT" 8080)"
+INTERVAL="$(num "$INTERVAL" 60)"; DAYS="$(num "$DAYS" 30)"; PORT="$(num "$PORT" 8080)"
+
+ADMIN_TOKEN_PREV="$(read_existing_admin_token docker-compose.yml)"
+if [ -n "$ADMIN_TOKEN_PREV" ]; then
+  ADMIN_TOKEN="$ADMIN_TOKEN_PREV"; ADMIN_TOKEN_NEW=n
+else
+  ADMIN_TOKEN="$(gen_token)"; ADMIN_TOKEN_NEW=y
+fi
+[ -n "$ADMIN_TOKEN" ] || die "не удалось сгенерировать ADMIN_TOKEN (нет openssl/urandom/base64?)"
 
 echo
 c_y "nginx (официальный nginx.org) на портах 80/443. Если на сервере уже есть панель"
@@ -111,34 +210,21 @@ fi
 
 cat > docker-compose.yml <<EOF
 services:
-  xray-checker:
-    image: kutovoys/xray-checker
-    container_name: xray-checker
-    restart: unless-stopped
-    environment:
-      - SUBSCRIPTION_URL=${SUB_URL}
-      - METRICS_PROTECTED=true
-      - METRICS_USERNAME=${MUSER}
-      - METRICS_PASSWORD=${MPASS}
-      - WEB_PUBLIC=true
-      - PROXY_CHECK_INTERVAL=${INTERVAL}
-    ports:
-      - "127.0.0.1:2112:2112"
-
   statuspage:
-    image: ${IMAGE}
+    build: ./${SRC_DIR_REL}
     container_name: statuspage
     restart: unless-stopped
-    depends_on:
-      - xray-checker
     environment:
-      - CHECKER_URL=http://xray-checker:2112
+      - PROBE_SUBSCRIPTION_URL=${SUB_URL}
+      - PROBE_SUBSCRIPTION_USER_AGENT=v2rayN/6.40
+      - PROBE_TARGETS_TTL_MIN=10
       - POLL_INTERVAL=${INTERVAL}
       - DAYS=${DAYS}
       - TZ=${TZ_VAL}
       - TITLE=${TITLE}
       - SUBTITLE=${SUBTITLE}
       - DB_PATH=/data/status.db
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
     volumes:
       - ./data:/data
     ports:
@@ -146,15 +232,15 @@ services:
 EOF
 
 mkdir -p data
-c_g "Тяну образ и запускаю контейнеры…"
-docker compose pull || c_y "Не удалось стянуть образ statuspage. Если GHCR-пакет приватный — сделай его публичным (GitHub → Packages → этот пакет → Package settings → Change visibility → Public), либо выполни: docker login ghcr.io"
-docker compose up -d || die "не удалось поднять контейнеры. Частая причина — занят порт ${PORT} или 2112 (старый сервис?). Освободи порт (или укажи другой при повторном запуске) и попробуй снова. Логи: docker compose logs"
+ensure_source
+c_g "Собираю образ statuspage из исходников и запускаю контейнеры…"
+docker compose up -d --build || die "не удалось собрать/поднять контейнеры. Частая причина — занят порт ${PORT} или 2112 (старый сервис?). Освободи порт (или укажи другой при повторном запуске) и попробуй снова. Логи: docker compose logs"
 
 sleep 6
-if curl -fsS "http://127.0.0.1:2112/api/v1/public/proxies" >/dev/null 2>&1; then
-  c_g "checker отвечает, подписка читается."
+if curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+  c_g "statuspage отвечает на /health."
 else
-  c_y "checker пока не отвечает — возможно ещё стартует или подписка недоступна. Это не критично, проверь позже: docker compose logs xray-checker"
+  c_y "statuspage пока не отвечает — возможно ещё стартует. Логи: docker compose logs statuspage"
 fi
 
 CERT_OK=n
@@ -265,6 +351,7 @@ fi
 
 cat > .install-info <<EOF
 Логин/пароль админки checker: ${MUSER} / ${MPASS}
+Админ-токен (удаление записей со страницы): ${ADMIN_TOKEN}
 Страница: ${PUB_URL}
 Локально: http://127.0.0.1:${PORT}
 EOF
@@ -278,5 +365,9 @@ else
   c_y "Направь на неё свою панель/прокси (proxy_pass http://127.0.0.1:${PORT})."
 fi
 echo "Админка/метрики checker под Basic Auth: ${MUSER} / ${MPASS}"
+echo "Админ-токен страницы (иконка-замок в шапке): ${ADMIN_TOKEN}"
+if [ "${ADMIN_TOKEN_NEW:-n}" = y ]; then
+  c_g "  ↑ сгенерирован автоматически — сохрани, чтобы войти в админ-режим в браузере."
+fi
 echo "Доступы сохранены в ${INSTALL_DIR}/.install-info"
 echo "Фавикон/лого: положи файл favicon.png в ${INSTALL_DIR}/data — подхватится сам."
