@@ -26,6 +26,10 @@ SUBTITLE = os.environ.get("SUBTITLE", "Доступность серверов �
 TZ_NAME = os.environ.get("TZ", "Europe/Moscow")
 SERVER_HEADER = os.environ.get("SERVER_HEADER", "nginx")
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
+ADMIN_TOKEN_MIN_LEN = 48
+_ADMIN_TOKEN_TOO_SHORT = bool(ADMIN_TOKEN) and len(ADMIN_TOKEN) < ADMIN_TOKEN_MIN_LEN
+if _ADMIN_TOKEN_TOO_SHORT:
+    ADMIN_TOKEN = ""
 # Сколько часов держать запись в `current`, если xray-checker перестал её отдавать.
 # 0 — авточистку выключить (старое поведение, дубли копятся вручную).
 STALE_AFTER_HOURS = int(os.environ.get("STALE_AFTER_HOURS", "24"))
@@ -144,6 +148,7 @@ COUNTRY_KEYWORDS = [
 ]
 
 _lock = threading.Lock()
+_alldown_streak = 0
 
 
 def detect_country(name):
@@ -252,13 +257,21 @@ def delete_server(sid):
 
 
 def fetch_proxies():
-    req = urllib.request.Request(
-        CHECKER_URL + "/api/v1/public/proxies",
-        headers={"User-Agent": "xray-status/1.0"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        payload = json.loads(r.read().decode("utf-8"))
-    data = payload.get("data") if isinstance(payload, dict) else payload
-    return data or []
+    last_err = None
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(
+                CHECKER_URL + "/api/v1/public/proxies",
+                headers={"User-Agent": "xray-status/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                payload = json.loads(r.read().decode("utf-8"))
+            data = payload.get("data") if isinstance(payload, dict) else payload
+            return data or []
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(4)
+    raise last_err
 
 
 def poll_once():
@@ -271,16 +284,22 @@ def poll_once():
     # и не пишется в историю. Управляется двумя уровнями:
     #   - env GLOBAL_OUTAGE_RATIO (порог; > 1 — мастер-выключатель),
     #   - settings `skip_global` (переключатель в UI админ-режима).
+    global _alldown_streak
     valid = [p for p in proxies if (p.get("stableId") or "")]
     n_valid = len(valid)
     n_offline = sum(1 for p in valid if not p.get("online"))
-    if n_valid >= 2 and (n_offline / n_valid) >= GLOBAL_OUTAGE_RATIO:
-        sg_on = get_setting("skip_global", skip_global_default()) == "1"
-        if sg_on:
-            print("global-outage: %d/%d прокси офлайн в одном опросе — цикл пропущен "
-                  "(артефакт чекера, не записываем в историю)" % (n_offline, n_valid),
+    all_down = n_valid >= 2 and (n_offline / n_valid) >= GLOBAL_OUTAGE_RATIO
+    if all_down and get_setting("skip_global", skip_global_default()) == "1":
+        _alldown_streak += 1
+        if _alldown_streak < 2:
+            print("global-outage: %d/%d офлайн разом — не записываем, ждём подтверждения "
+                  "следующим циклом (вероятно артефакт чекера)" % (n_offline, n_valid),
                   flush=True)
             return
+        print("global-outage подтверждён (%d цикла подряд) — пишем как реальный простой"
+              % _alldown_streak, flush=True)
+    else:
+        _alldown_streak = 0
 
     with _lock, conn() as c:
         for seq, p in enumerate(proxies):
@@ -477,7 +496,6 @@ def build_summary():
         "generatedAt": now_local.strftime("%Y-%m-%d %H:%M"),
         "lastCheck": last_check,
         "servers": out_servers, "totals": totals,
-        "adminEnabled": bool(ADMIN_TOKEN),
     }
 
 
@@ -580,7 +598,7 @@ html[data-theme="dark"]{--bg:#16181d; --card:#1f232a; --soft:#23272f; --line:#33
 html[data-theme="claude"]{
   --bg:#F0EEE6; --card:#FAF9F5; --soft:#E8E5DA; --line:#D9D5C6; --hover:#ECE9DD;
   --tx:#1F1E1D; --tx2:#4B4337; --tx3:#7A7363;
-  --ok:#5F8A56; --warn:#C48923; --orange:#C76A47; --bad:#B44A3A; --info:#D97757;
+  --ok:#5F8A56; --warn:#95681A; --orange:#C76A47; --bad:#B44A3A; --info:#C0694D;
   --shadow:0 1px 2px rgba(50,30,15,.05),0 1px 3px rgba(50,30,15,.04);
 }
 html[data-theme="claude"] body{background:radial-gradient(1200px 600px at 50% -200px,#F5F2E8 0%,#F0EEE6 60%) no-repeat fixed,var(--bg);}
@@ -762,10 +780,10 @@ body{margin:0;background:var(--bg);color:var(--tx);
     </div>
     <div class="adminrow">
       <div id="sg-label" class="adminlabel">
-        Игнорировать глобальные сбои чекера
-        <small id="sg-sub">когда офлайн все серверы сразу — не считать это простоем</small>
+        Подтверждать глобальные сбои чекера (антидребезг)
+        <small id="sg-sub">когда офлайн все разом — держим цикл до подтверждения (разовый сбой не пишем, длящийся — пишем)</small>
       </div>
-      <button id="sg-toggle" class="actoggle" type="button" aria-label="Игнорировать глобальные сбои"></button>
+      <button id="sg-toggle" class="actoggle" type="button" aria-label="Подтверждать глобальные сбои"></button>
     </div>
   </div>
   <div id="list"><div class="skel">Загрузка данных…</div></div>
@@ -1039,8 +1057,6 @@ function sameOrder(data){
 var lastSeen=null;
 function render(data){
   updateTop(data);
-  var en=!!data.adminEnabled;
-  if(en!==adminEnabled){adminEnabled=en;setLockUI();}
   var fresh=data.lastCheck!==lastSeen;lastSeen=data.lastCheck;
   if(sameOrder(data)){
     data.servers.forEach(function(s){var item=nodes[s.sid];if(item)applyServer(item,s,data.days);});
@@ -1063,11 +1079,9 @@ var LOCK_CLOSED='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" str
 var LOCK_OPEN='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>';
 function setLockUI(){
   var b=document.getElementById("lock");if(!b)return;
-  if(!adminEnabled){b.hidden=true;return;}
-  b.hidden=false;
-  b.innerHTML=adminMode?LOCK_OPEN:LOCK_CLOSED;
-  if(adminMode){b.classList.add("lockon");b.title="Выйти из админ-режима";}
-  else{b.classList.remove("lockon");b.title="Войти в админ-режим";}
+  if(!adminMode){b.hidden=true;b.classList.remove("lockon");return;}
+  b.hidden=false;b.innerHTML=LOCK_OPEN;b.classList.add("lockon");
+  b.title="Выйти из админ-режима";
 }
 function checkAdmin(cb){
   if(!adminToken){adminMode=false;setLockUI();if(cb)cb();return;}
@@ -1128,7 +1142,7 @@ function loadAdminSettings(){
       }
       document.getElementById("ac-toggle").disabled=autocleanLocked;
       applyToggleUI("ac-toggle",autocleanState);
-      // Игнорировать глобальные сбои чекера
+      // Подтверждать глобальные сбои чекера
       skipGlobalState=!!s.skipGlobal;
       skipGlobalLocked=!!s.skipGlobalLocked;
       var sgsub=document.getElementById("sg-sub");
@@ -1138,7 +1152,7 @@ function loadAdminSettings(){
         sglbl.classList.add("aclocked");
       }else{
         var pct=Math.round((s.globalRatio||1)*100);
-        sgsub.innerHTML='когда офлайн ≥ '+pct+'% серверов сразу — не считать это простоем';
+        sgsub.innerHTML='когда офлайн ≥ '+pct+'% разом — держим цикл до подтверждения (разовый сбой не пишем, длящийся — пишем)';
         sglbl.classList.remove("aclocked");
       }
       document.getElementById("sg-toggle").disabled=skipGlobalLocked;
@@ -1190,8 +1204,14 @@ function deleteServer(sid,name,members){
     .catch(function(){window.alert("Сетевая ошибка");});
 }
 (function(){
-  var b=document.getElementById("lock");if(!b)return;
-  b.addEventListener("click",function(){adminMode?logoutAdmin():promptAdminToken();});
+  var b=document.getElementById("lock");
+  if(b)b.addEventListener("click",function(){adminMode?logoutAdmin():promptAdminToken();});
+  document.addEventListener("keydown",function(e){
+    if(e.ctrlKey&&e.shiftKey&&(e.code==="KeyL"||e.key==="L"||e.key==="l")){e.preventDefault();adminMode?logoutAdmin():promptAdminToken();}
+  });
+  function hashEntry(){if(location.hash==="#admin"&&!adminMode)promptAdminToken();}
+  window.addEventListener("hashchange",hashEntry);
+  hashEntry();
 })();
 (function(){
   var SUN='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
@@ -1294,6 +1314,9 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return {}
 
+    def _send_404(self):
+        self._send(404, "Not Found", "text/plain; charset=utf-8")
+
     def _send(self, code, body, ctype, cache=NO_CACHE):
         data = body.encode("utf-8") if isinstance(body, str) else body
         gz = False
@@ -1356,8 +1379,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(404, "Not Found", "text/plain; charset=utf-8")
         elif path == "/api/admin/settings":
             if not self._is_admin():
-                self._send(401, '{"error":"unauthorized"}',
-                           "application/json; charset=utf-8")
+                self._send_404()
                 return
             ac = get_setting("autoclean", autoclean_default()) == "1"
             sg = get_setting("skip_global", skip_global_default()) == "1"
@@ -1378,20 +1400,14 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/api/admin/check":
-            if not ADMIN_TOKEN:
-                self._send(404, '{"error":"admin disabled"}',
-                           "application/json; charset=utf-8")
-                return
             if self._is_admin():
                 self._send(200, '{"ok":true}',
                            "application/json; charset=utf-8")
             else:
-                self._send(401, '{"ok":false}',
-                           "application/json; charset=utf-8")
+                self._send_404()
         elif path == "/api/admin/delete":
             if not self._is_admin():
-                self._send(401, '{"error":"unauthorized"}',
-                           "application/json; charset=utf-8")
+                self._send_404()
                 return
             body = self._read_json()
             sid = (body.get("sid") if isinstance(body, dict) else None) or ""
@@ -1405,8 +1421,7 @@ class Handler(BaseHTTPRequestHandler):
                        "application/json; charset=utf-8")
         elif path == "/api/admin/settings":
             if not self._is_admin():
-                self._send(401, '{"error":"unauthorized"}',
-                           "application/json; charset=utf-8")
+                self._send_404()
                 return
             body = self._read_json()
             if isinstance(body, dict) and "autoclean" in body:
@@ -1427,6 +1442,9 @@ def main():
     init_db()
     threading.Thread(target=ensure_fonts, daemon=True).start()
     threading.Thread(target=poller, daemon=True).start()
+    if _ADMIN_TOKEN_TOO_SHORT:
+        print("ВНИМАНИЕ: ADMIN_TOKEN короче %d символов — админ-режим ОТКЛЮЧЁН. "
+              "Сгенерируй надёжный токен:  openssl rand -hex 24" % ADMIN_TOKEN_MIN_LEN, flush=True)
     print("xray-status on :%d, checker=%s, tz=%s" % (PORT, CHECKER_URL, TZ_NAME), flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
