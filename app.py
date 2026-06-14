@@ -32,7 +32,7 @@ if _ADMIN_TOKEN_TOO_SHORT:
     ADMIN_TOKEN = ""
 # Сколько часов держать запись в `current`, если xray-checker перестал её отдавать.
 # 0 — авточистку выключить (старое поведение, дубли копятся вручную).
-STALE_AFTER_HOURS = int(os.environ.get("STALE_AFTER_HOURS", "24"))
+STALE_AFTER_HOURS = int(os.environ.get("STALE_AFTER_HOURS", "0"))
 # Отсев «глобальных сбоев чекера»: если в одном опросе доля офлайн-прокси >= порога
 # (по умолчанию 1.0 — т.е. ВСЕ офлайн), цикл считается артефактом самого xray-checker
 # (рестарт, сетевой сбой, перечитывание подписки) и НЕ записывается в историю — иначе
@@ -201,7 +201,7 @@ def init_db():
         c.execute("""CREATE TABLE IF NOT EXISTS samples(
             ts INTEGER, sid TEXT, online INTEGER, latency INTEGER)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_samples ON samples(sid, ts)")
-        c.execute("DROP TABLE IF EXISTS hidden")
+        c.execute("""CREATE TABLE IF NOT EXISTS hidden(name TEXT PRIMARY KEY)""")
         c.execute("""CREATE TABLE IF NOT EXISTS settings(
             k TEXT PRIMARY KEY, v TEXT)""")
 
@@ -253,7 +253,23 @@ def delete_server(sid):
             c.execute("DELETE FROM current WHERE sid=?", (s,))
             c.execute("DELETE FROM daily   WHERE sid=?", (s,))
             c.execute("DELETE FROM samples WHERE sid=?", (s,))
+        c.execute("DELETE FROM hidden WHERE name=?", (name,))
         return len(members)
+
+
+def set_hidden(sid, hide):
+    if not sid:
+        return False
+    with _lock, conn() as c:
+        row = c.execute("SELECT name FROM current WHERE sid=?", (sid,)).fetchone()
+        if not row:
+            return False
+        name = row[0]
+        if hide:
+            c.execute("INSERT OR IGNORE INTO hidden(name) VALUES(?)", (name,))
+        else:
+            c.execute("DELETE FROM hidden WHERE name=?", (name,))
+        return True
 
 
 def fetch_proxies():
@@ -363,6 +379,8 @@ def poll_once():
         cutoff = (datetime.now(tz()) - timedelta(days=DAYS + 1)).strftime("%Y-%m-%d")
         c.execute("DELETE FROM daily WHERE day < ?", (cutoff,))
         c.execute("DELETE FROM samples WHERE ts < ?", (now - SAMPLE_RETAIN_DAYS * 86400,))
+        c.execute("INSERT INTO settings(k,v) VALUES('last_poll_ts',?) "
+                  "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (str(now),))
 
 
 def poller():
@@ -379,7 +397,7 @@ def poller():
         time.sleep(POLL_INTERVAL)
 
 
-def build_summary():
+def build_summary(admin=False):
     t = tz()
     now_local = datetime.now(t)
     day_list = [(now_local - timedelta(days=i)).strftime("%Y-%m-%d")
@@ -391,6 +409,9 @@ def build_summary():
             "SELECT sid,name,online,latency,ts,seq FROM current ORDER BY seq").fetchall()
         daily_rows = c.execute(
             "SELECT sid,day,up,down,lat_sum,lat_cnt,down_conf FROM daily").fetchall()
+        hidden = set(r[0] for r in c.execute("SELECT name FROM hidden").fetchall())
+        lpt = c.execute("SELECT v FROM settings WHERE k='last_poll_ts'").fetchone()
+        last_poll_ts = int(lpt[0]) if lpt and str(lpt[0]).isdigit() else 0
 
     by_sid = {}
     for sid, day, up, down, lat_sum, lat_cnt, down_conf in daily_rows:
@@ -410,6 +431,7 @@ def build_summary():
     tot_total = 0
     tot_down_min = 0
     online_count = 0
+    visible_count = 0
     lat_vals = []
     last_ts = 0
 
@@ -458,15 +480,29 @@ def build_summary():
         members_by_freshness = sorted(members, key=lambda x: x[3], reverse=True)
         canon_sid, canon_online, canon_latency, canon_ts, _ = members_by_freshness[0]
 
+        is_hidden = name in hidden
+        active = (any(m[3] >= last_poll_ts for m in members)
+                  if last_poll_ts else True)
+        visible_public = active and not is_hidden
+        # Публике скрытые и отсутствующие в чекере не показываем; в заголовочную
+        # статистику тоже идут только видимые.
+        if not admin and not visible_public:
+            continue
+
         up30 = round(s_up / s_total * 100, 2) if s_total else None
-        if canon_ts and canon_ts > last_ts:
-            last_ts = canon_ts
-        if canon_online:
-            online_count += 1
-            if canon_latency > 0:
-                lat_vals.append(canon_latency)
+        if visible_public:
+            visible_count += 1
+            if canon_ts and canon_ts > last_ts:
+                last_ts = canon_ts
+            if canon_online:
+                online_count += 1
+                if canon_latency > 0:
+                    lat_vals.append(canon_latency)
+            tot_up += s_up
+            tot_total += s_total
+            tot_down_min += s_down_min
         cc = detect_country(name)
-        out_servers.append({
+        entry = {
             "sid": canon_sid,
             "name": display_name(name, cc),
             "cc": cc,
@@ -476,15 +512,16 @@ def build_summary():
             "downMin30": s_down_min,
             "days": days,
             "members": len(members),
-        })
-        tot_up += s_up
-        tot_total += s_total
-        tot_down_min += s_down_min
+        }
+        if admin:
+            entry["hidden"] = is_hidden
+            entry["absent"] = not active
+        out_servers.append(entry)
 
     avg_lat = round(sum(lat_vals) / len(lat_vals)) if lat_vals else 0
     totals = {
         "online": online_count,
-        "total": len(out_servers),
+        "total": visible_count,
         "uptime30": round(tot_up / tot_total * 100, 2) if tot_total else None,
         "avgLatency": avg_lat,
         "downMin30": tot_down_min,
@@ -715,6 +752,10 @@ body{margin:0;background:var(--bg);color:var(--tx);
   border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--tx3);cursor:pointer;
   margin-left:2px;transition:background .15s,color .15s,border-color .15s;}
 .delbtn:hover{background:rgba(232,80,80,.12);color:var(--bad);border-color:var(--bad);}
+.delbtn.restore:hover{background:rgba(47,107,255,.12);color:var(--info);border-color:var(--info);}
+.item.ghost{opacity:.5;}
+.item.ghost:hover{opacity:.85;}
+.gbadge{font-size:11px;color:var(--tx3);border:1px solid var(--line);border-radius:6px;padding:1px 7px;margin-left:8px;flex:none;white-space:nowrap;}
 #lock.lockon{background:rgba(47,107,255,.13);color:var(--info);border-color:var(--info);}
 .adminbar{display:flex;flex-direction:column;
   background:var(--card);border:1px solid var(--line);border-radius:14px;
@@ -784,6 +825,13 @@ body{margin:0;background:var(--bg);color:var(--tx);
         <small id="sg-sub">когда офлайн все разом — держим цикл до подтверждения (разовый сбой не пишем, длящийся — пишем)</small>
       </div>
       <button id="sg-toggle" class="actoggle" type="button" aria-label="Подтверждать глобальные сбои"></button>
+    </div>
+    <div class="adminrow">
+      <div class="adminlabel">
+        Показать отсутствующие в чекере
+        <small>серым; их можно удалить из базы вручную</small>
+      </div>
+      <button id="ab-toggle" class="actoggle" type="button" aria-label="Показать отсутствующие"></button>
     </div>
   </div>
   <div id="list"><div class="skel">Загрузка данных…</div></div>
@@ -994,7 +1042,8 @@ function buildList(data){
   var list=document.getElementById("list");
   list.innerHTML="";nodes={};order=[];
   data.servers.forEach(function(s,idx){
-    var item=document.createElement("div");item.className="item";item._sid=s.sid;
+    var item=document.createElement("div");item.className="item"+((adminMode&&(s.hidden||s.absent))?" ghost":"");item._sid=s.sid;
+    if(adminMode&&s.absent&&!showAbsent)item.style.display="none";
     item.style.animationDelay=Math.min(idx*0.04,0.5)+"s";
     var row=document.createElement("div");row.className="row";
     var flag=s.cc?'<img class="flag" src="https://flagcdn.com/'+s.cc+'.svg" alt="" loading="lazy">':'<span class="flag"></span>';
@@ -1027,11 +1076,21 @@ function buildList(data){
     chev.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
     row.appendChild(label);row.appendChild(bars);row.appendChild(st2);row.appendChild(chev);
     if(adminMode){
-      var del=document.createElement("button");del.type="button";del.className="delbtn";
-      del.title="Удалить сервер";del.setAttribute("aria-label","Удалить сервер");
-      del.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
-      del.addEventListener("click",function(e){e.stopPropagation();deleteServer(s.sid,s.name,s.members);});
-      row.appendChild(del);
+      var mkbtn=function(cls,title,svg,fn){var b=document.createElement("button");b.type="button";b.className="delbtn"+cls;b.title=title;b.setAttribute("aria-label",title);b.innerHTML=svg;b.addEventListener("click",function(e){e.stopPropagation();fn();});return b;};
+      var badge=function(txt){var sp=document.createElement("span");sp.className="gbadge";sp.textContent=txt;row.appendChild(sp);};
+      var IX='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+      var ITR='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>';
+      var IBK='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-1"/></svg>';
+      if(s.absent){
+        badge("нет в чекере");
+        row.appendChild(mkbtn("","Удалить из базы",ITR,function(){deleteServer(s.sid,s.name,s.members);}));
+      }else if(s.hidden){
+        badge("скрыто");
+        row.appendChild(mkbtn(" restore","Вернуть на страницу",IBK,function(){hideServer(s.sid,s.name,false);}));
+        row.appendChild(mkbtn("","Удалить из базы",ITR,function(){deleteServer(s.sid,s.name,s.members);}));
+      }else{
+        row.appendChild(mkbtn("","Скрыть от пользователей",IX,function(){hideServer(s.sid,s.name,true);}));
+      }
     }
     var panel=document.createElement("div");panel.className="panel";panel.innerHTML='<div class="empty">Загрузка…</div>';
     row.addEventListener("click",function(){
@@ -1045,13 +1104,14 @@ function buildList(data){
     item.appendChild(row);item.appendChild(panel);
     item._dot=label.querySelector(".sdot");item._bars=barArr;item._p=pEl;item._s2=sEl;item._label=label;item._panel=panel;
     applyServer(item,s,data.days);
-    list.appendChild(item);order.push(s.sid);nodes[s.sid]=item;
+    list.appendChild(item);order.push(skey(s));nodes[s.sid]=item;
   });
   built=true;
 }
+function skey(s){return s.sid+"|"+(s.hidden?1:0)+(s.absent?1:0);}
 function sameOrder(data){
   if(!built||order.length!==data.servers.length)return false;
-  for(var i=0;i<order.length;i++)if(order[i]!==data.servers[i].sid)return false;
+  for(var i=0;i<order.length;i++)if(order[i]!==skey(data.servers[i]))return false;
   return true;
 }
 var lastSeen=null;
@@ -1066,7 +1126,8 @@ function render(data){
   }
 }
 function load(){
-  fetch("api/summary").then(function(r){return r.json();}).then(function(d){
+  var _o=(adminMode&&adminToken)?{headers:{"X-Admin-Token":adminToken}}:{};
+  fetch("api/summary",_o).then(function(r){return r.json();}).then(function(d){
     render(d);
     if(adminMode)loadAdminSettings();
     else{var ab=document.getElementById("adminbar");if(ab)ab.hidden=true;}
@@ -1074,6 +1135,8 @@ function load(){
   .catch(function(){document.getElementById("list").innerHTML='<div class="skel">Не удалось загрузить данные</div>';});
 }
 var adminEnabled=false, adminMode=false, adminToken="";
+var showAbsent=false;
+try{showAbsent=localStorage.getItem("sp-show-absent")==="1";}catch(e){}
 try{adminToken=localStorage.getItem("sp-admin-token")||"";}catch(e){}
 var LOCK_CLOSED='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 var LOCK_OPEN='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>';
@@ -1157,6 +1220,7 @@ function loadAdminSettings(){
       }
       document.getElementById("sg-toggle").disabled=skipGlobalLocked;
       applyToggleUI("sg-toggle",skipGlobalState);
+      applyToggleUI("ab-toggle",showAbsent);
       ab.hidden=false;
     })
     .catch(function(){});
@@ -1189,6 +1253,17 @@ function postSetting(key,toggleId,getState,setState,getLocked){
       function(){return skipGlobalLocked;});
   });
 })();
+function hideServer(sid,name,hide){
+  fetch("api/admin/hide",{method:"POST",
+    headers:{"X-Admin-Token":adminToken,"Content-Type":"application/json"},
+    body:JSON.stringify({sid:sid,hidden:hide})})
+    .then(function(r){
+      if(r.ok){built=false;load();}
+      else if(r.status===404||r.status===401){window.alert("Сессия истекла. Войдите заново.");logoutAdmin();}
+      else{window.alert("Не удалось применить");}
+    })
+    .catch(function(){window.alert("Сетевая ошибка");});
+}
 function deleteServer(sid,name,members){
   var n=members||1;
   var extra=n>1?'\n\nЭто группа из '+n+' sub-серверов одного хоста (роутинг xray-checker) — будут удалены все.':'';
@@ -1236,6 +1311,14 @@ window.addEventListener("resize",function(){
   var ps=document.querySelectorAll(".item.open .panel");
   for(var i=0;i<ps.length;i++)ps[i].style.maxHeight=ps[i].scrollHeight+"px";
 });
+(function(){
+  var t=document.getElementById("ab-toggle");
+  if(t)t.addEventListener("click",function(){
+    showAbsent=!showAbsent;
+    try{localStorage.setItem("sp-show-absent",showAbsent?"1":"0");}catch(e){}
+    applyToggleUI("ab-toggle",showAbsent);built=false;load();
+  });
+})();
 checkAdmin(load);
 setInterval(function(){if(!document.hidden)load();},60000);
 document.addEventListener("visibilitychange",function(){if(!document.hidden)load();});
@@ -1343,7 +1426,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             self._send(200, page_html(), "text/html; charset=utf-8")
         elif path == "/api/summary":
-            self._send(200, json.dumps(build_summary(), ensure_ascii=False),
+            self._send(200, json.dumps(build_summary(admin=self._is_admin()), ensure_ascii=False),
                        "application/json; charset=utf-8")
         elif path == "/api/today":
             qs = parse_qs(parsed.query)
@@ -1418,6 +1501,21 @@ class Handler(BaseHTTPRequestHandler):
             ok = delete_server(sid)
             self._send(200,
                        json.dumps({"ok": True, "deleted": ok}, ensure_ascii=False),
+                       "application/json; charset=utf-8")
+        elif path == "/api/admin/hide":
+            if not self._is_admin():
+                self._send_404()
+                return
+            body = self._read_json()
+            sid = (body.get("sid") if isinstance(body, dict) else None) or ""
+            hide = bool(body.get("hidden")) if isinstance(body, dict) else False
+            if not sid:
+                self._send(400, '{"error":"sid required"}',
+                           "application/json; charset=utf-8")
+                return
+            ok = set_hidden(sid, hide)
+            self._send(200,
+                       json.dumps({"ok": True, "applied": ok}, ensure_ascii=False),
                        "application/json; charset=utf-8")
         elif path == "/api/admin/settings":
             if not self._is_admin():
