@@ -203,6 +203,7 @@ cd /opt/xray-checker-statuspage && docker compose pull && docker compose up -d
 ## Благодарности
 
 - [kutovoys/xray-checker](https://github.com/kutovoys/xray-checker) — движок проверки прокси, на котором всё держится.
+- [ASTORKA](https://github.com/ASTORKA) — группировка sub-серверов, авточистка дублей, админ-режим и темы (ветка `dev`, PR #1).
 
 ## Лицензия
 
