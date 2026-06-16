@@ -25,6 +25,21 @@ TITLE = os.environ.get("TITLE", "Статус серверов")
 SUBTITLE = os.environ.get("SUBTITLE", "Доступность серверов в реальном времени")
 TZ_NAME = os.environ.get("TZ", "Europe/Moscow")
 SERVER_HEADER = os.environ.get("SERVER_HEADER", "nginx")
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
+ADMIN_TOKEN_MIN_LEN = 48
+_ADMIN_TOKEN_TOO_SHORT = bool(ADMIN_TOKEN) and len(ADMIN_TOKEN) < ADMIN_TOKEN_MIN_LEN
+if _ADMIN_TOKEN_TOO_SHORT:
+    ADMIN_TOKEN = ""
+# Сколько часов держать запись в `current`, если xray-checker перестал её отдавать.
+# 0 — авточистку выключить (старое поведение, дубли копятся вручную).
+STALE_AFTER_HOURS = int(os.environ.get("STALE_AFTER_HOURS", "0"))
+# Отсев «глобальных сбоев чекера»: если в одном опросе доля офлайн-прокси >= порога
+# (по умолчанию 1.0 — т.е. ВСЕ офлайн), цикл считается артефактом самого xray-checker
+# (рестарт, сетевой сбой, перечитывание подписки) и НЕ записывается в историю — иначе
+# у всех серверов одновременно копится одинаковый ложный простой. Географически
+# разнесённые серверы не могут отказать в одну секунду — это всегда чекер.
+# Чтобы выключить отсев — задай значение > 1 (например 2).
+GLOBAL_OUTAGE_RATIO = float(os.environ.get("GLOBAL_OUTAGE_RATIO", "1.0"))
 STATIC_CACHE = "public, max-age=31536000, immutable"
 NO_CACHE = "no-cache, no-store, must-revalidate"
 
@@ -133,6 +148,7 @@ COUNTRY_KEYWORDS = [
 ]
 
 _lock = threading.Lock()
+_alldown_streak = 0
 
 
 def detect_country(name):
@@ -185,22 +201,122 @@ def init_db():
         c.execute("""CREATE TABLE IF NOT EXISTS samples(
             ts INTEGER, sid TEXT, online INTEGER, latency INTEGER)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_samples ON samples(sid, ts)")
+        c.execute("""CREATE TABLE IF NOT EXISTS hidden(name TEXT PRIMARY KEY)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS settings(
+            k TEXT PRIMARY KEY, v TEXT)""")
+
+
+def _get_setting_c(c, k, default=None):
+    row = c.execute("SELECT v FROM settings WHERE k=?", (k,)).fetchone()
+    return row[0] if row else default
+
+
+def get_setting(k, default=None):
+    with _lock, conn() as c:
+        return _get_setting_c(c, k, default)
+
+
+def set_setting(k, v):
+    with _lock, conn() as c:
+        c.execute("INSERT INTO settings(k,v) VALUES(?,?) "
+                  "ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                  (k, str(v)))
+
+
+def autoclean_default():
+    return "1" if STALE_AFTER_HOURS > 0 else "0"
+
+
+def skip_global_default():
+    # Отсев включён, если порог достижим (<= 1.0). При GLOBAL_OUTAGE_RATIO > 1
+    # фича отключена через env и тогл в UI недоступен.
+    return "1" if GLOBAL_OUTAGE_RATIO <= 1.0 else "0"
+
+
+def delete_server(sid):
+    """Удаляет всю группу записей с тем же `name`, что и у переданного `sid`.
+
+    Один и тот же хост в xray-checker может быть представлен несколькими
+    `stableId` (sub-серверы под общим роутингом): у них совпадает `name`, а
+    опрашиваются они по очереди. Логически это один хост, поэтому ручное
+    удаление должно затрагивать всю группу, иначе остались бы «полу-призраки»."""
+    if not sid:
+        return 0
+    with _lock, conn() as c:
+        row = c.execute("SELECT name FROM current WHERE sid=?", (sid,)).fetchone()
+        if not row:
+            return 0
+        name = row[0]
+        members = [r[0] for r in c.execute(
+            "SELECT sid FROM current WHERE name=?", (name,)).fetchall()]
+        for s in members:
+            c.execute("DELETE FROM current WHERE sid=?", (s,))
+            c.execute("DELETE FROM daily   WHERE sid=?", (s,))
+            c.execute("DELETE FROM samples WHERE sid=?", (s,))
+        c.execute("DELETE FROM hidden WHERE name=?", (name,))
+        return len(members)
+
+
+def set_hidden(sid, hide):
+    if not sid:
+        return False
+    with _lock, conn() as c:
+        row = c.execute("SELECT name FROM current WHERE sid=?", (sid,)).fetchone()
+        if not row:
+            return False
+        name = row[0]
+        if hide:
+            c.execute("INSERT OR IGNORE INTO hidden(name) VALUES(?)", (name,))
+        else:
+            c.execute("DELETE FROM hidden WHERE name=?", (name,))
+        return True
 
 
 def fetch_proxies():
-    req = urllib.request.Request(
-        CHECKER_URL + "/api/v1/public/proxies",
-        headers={"User-Agent": "xray-status/1.0"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        payload = json.loads(r.read().decode("utf-8"))
-    data = payload.get("data") if isinstance(payload, dict) else payload
-    return data or []
+    last_err = None
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(
+                CHECKER_URL + "/api/v1/public/proxies",
+                headers={"User-Agent": "xray-status/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                payload = json.loads(r.read().decode("utf-8"))
+            data = payload.get("data") if isinstance(payload, dict) else payload
+            return data or []
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(4)
+    raise last_err
 
 
 def poll_once():
     proxies = fetch_proxies()
     now = int(time.time())
     today = datetime.now(tz()).strftime("%Y-%m-%d")
+
+    # Отсев глобального сбоя чекера: если в одном опросе доля офлайн-прокси >= порога
+    # (по умолчанию — когда офлайн ВСЕ), цикл считается артефактом самого xray-checker
+    # и не пишется в историю. Управляется двумя уровнями:
+    #   - env GLOBAL_OUTAGE_RATIO (порог; > 1 — мастер-выключатель),
+    #   - settings `skip_global` (переключатель в UI админ-режима).
+    global _alldown_streak
+    valid = [p for p in proxies if (p.get("stableId") or "")]
+    n_valid = len(valid)
+    n_offline = sum(1 for p in valid if not p.get("online"))
+    all_down = n_valid >= 2 and (n_offline / n_valid) >= GLOBAL_OUTAGE_RATIO
+    if all_down and get_setting("skip_global", skip_global_default()) == "1":
+        _alldown_streak += 1
+        if _alldown_streak < 2:
+            print("global-outage: %d/%d офлайн разом — не записываем, ждём подтверждения "
+                  "следующим циклом (вероятно артефакт чекера)" % (n_offline, n_valid),
+                  flush=True)
+            return
+        print("global-outage подтверждён (%d цикла подряд) — пишем как реальный простой"
+              % _alldown_streak, flush=True)
+    else:
+        _alldown_streak = 0
+
     with _lock, conn() as c:
         for seq, p in enumerate(proxies):
             sid = p.get("stableId") or ""
@@ -232,9 +348,39 @@ def poll_once():
                       (today, sid, up, down, lat_sum, lat_cnt, down_conf))
             c.execute("INSERT INTO samples(ts,sid,online,latency) VALUES(?,?,?,?)",
                       (now, sid, online, latency))
+        # Авточистка «призраков»: записи в current, которые уже не приходят из чекера
+        # (xray-checker иногда меняет stableId без явных правок конфига — обновление парсера,
+        # мелкие правки на стороне подписки и т.п.; старая запись висит в БД офлайн навсегда).
+        # Условия запуска:
+        #   - чекер в этом опросе вернул хотя бы один сервер (не пустой ответ),
+        #   - порог STALE_AFTER_HOURS > 0 (мастер-выключатель через env),
+        #   - в settings включён `autoclean` (переключатель через UI админ-режима).
+        ac_on = _get_setting_c(c, "autoclean", autoclean_default()) == "1"
+        if proxies and STALE_AFTER_HOURS > 0 and ac_on:
+            stale_cut = now - STALE_AFTER_HOURS * 3600
+            # Группируем `current` по name и удаляем только те группы, у которых
+            # ВСЕ члены старше порога. Хосты с альтернирующим роутингом так
+            # не задевает: пока хотя бы один sub-сервер свежий, группа жива.
+            rows = c.execute("SELECT name, sid, ts FROM current").fetchall()
+            by_name = {}
+            for nm, sid, ts in rows:
+                by_name.setdefault(nm, []).append((sid, ts))
+            stale = []
+            for nm, items in by_name.items():
+                if all(t < stale_cut for _, t in items):
+                    stale.extend(sid for sid, _ in items)
+            for sid in stale:
+                c.execute("DELETE FROM current WHERE sid=?", (sid,))
+                c.execute("DELETE FROM daily   WHERE sid=?", (sid,))
+                c.execute("DELETE FROM samples WHERE sid=?", (sid,))
+            if stale:
+                print("auto-cleanup: removed %d sid(s) from fully-stale groups (>%dh): %s"
+                      % (len(stale), STALE_AFTER_HOURS, stale), flush=True)
         cutoff = (datetime.now(tz()) - timedelta(days=DAYS + 1)).strftime("%Y-%m-%d")
         c.execute("DELETE FROM daily WHERE day < ?", (cutoff,))
         c.execute("DELETE FROM samples WHERE ts < ?", (now - SAMPLE_RETAIN_DAYS * 86400,))
+        c.execute("INSERT INTO settings(k,v) VALUES('last_poll_ts',?) "
+                  "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (str(now),))
 
 
 def poller():
@@ -251,7 +397,7 @@ def poller():
         time.sleep(POLL_INTERVAL)
 
 
-def build_summary():
+def build_summary(admin=False):
     t = tz()
     now_local = datetime.now(t)
     day_list = [(now_local - timedelta(days=i)).strftime("%Y-%m-%d")
@@ -263,61 +409,119 @@ def build_summary():
             "SELECT sid,name,online,latency,ts,seq FROM current ORDER BY seq").fetchall()
         daily_rows = c.execute(
             "SELECT sid,day,up,down,lat_sum,lat_cnt,down_conf FROM daily").fetchall()
+        hidden = set(r[0] for r in c.execute("SELECT name FROM hidden").fetchall())
+        lpt = c.execute("SELECT v FROM settings WHERE k='last_poll_ts'").fetchone()
+        last_poll_ts = int(lpt[0]) if lpt and str(lpt[0]).isdigit() else 0
 
     by_sid = {}
     for sid, day, up, down, lat_sum, lat_cnt, down_conf in daily_rows:
         by_sid.setdefault(sid, {})[day] = (up, down, lat_sum, lat_cnt, down_conf or 0)
 
+    # Группируем sid'ы по raw `name`. Один и тот же хост в xray-checker может
+    # быть представлен несколькими sub-серверами под общим роутингом —
+    # опрашиваются они по очереди, и поверх друг друга дают полную картину.
+    groups = {}  # name -> list[(sid, online, latency, ts, seq)]
+    for sid, name, online, latency, ts, seq in servers:
+        groups.setdefault(name, []).append((sid, online, latency, ts, seq))
+    # Порядок групп — по минимальному seq среди их членов (стабилен между опросами)
+    sorted_groups = sorted(groups.items(), key=lambda kv: min(m[4] for m in kv[1]))
+
     out_servers = []
-    tot_up = tot_total = 0
+    tot_up = 0
+    tot_total = 0
     tot_down_min = 0
     online_count = 0
+    visible_count = 0
     lat_vals = []
     last_ts = 0
 
-    for sid, name, online, latency, ts, seq in servers:
+    for name, members in sorted_groups:
         days = []
-        s_up = s_total = 0
+        s_up = 0
+        s_total = 0
         s_down_min = 0
         for d in day_list:
-            rec = by_sid.get(sid, {}).get(d)
-            if rec:
-                up, down, lat_sum, lat_cnt, down_conf = rec
-                total = up + down
-                pct = round(up / total * 100, 2) if total else None
-                down_min = round(down_conf * min_per_sample)
+            # «Наложение графиков»: складываем проверки всех членов группы за день.
+            # Доля аптайма = успешные проверки / все проверки — это корректно и для
+            # чередующихся sid (пока активен один, второй молчит), и для одновременно
+            # опрашиваемых (xray-checker опрашивает всех каждый цикл). Никаких min()/
+            # cap — иначе реальные сбои маскируются, а у 2-членной группы аптайм
+            # удваивается (что и давало ложные 100% и одинаковые значения у всех).
+            sum_up = sum_total = 0
+            sum_down_conf = 0
+            n_with_data = 0
+            for sid, *_ in members:
+                rec = by_sid.get(sid, {}).get(d)
+                if rec:
+                    n_with_data += 1
+                    sum_up += rec[0]
+                    sum_total += rec[0] + rec[1]
+                    sum_down_conf += rec[4]
+            if sum_total > 0:
+                pct = round(sum_up / sum_total * 100, 2)
+                # Минуты простоя: confirmed-down проверки → минуты. Делим на число
+                # активных в этот день членов, чтобы при одновременном опросе не
+                # удваивать (для n=1 совпадает со старой формулой).
+                down_min_d = round(sum_down_conf / n_with_data * min_per_sample)
+                s_up += sum_up
+                s_total += sum_total
+                s_down_min += down_min_d
+                has_data = True
             else:
-                total = 0
                 pct = None
-                down_min = 0
-            s_up += rec[0] if rec else 0
-            s_total += (rec[0] + rec[1]) if rec else 0
-            s_down_min += down_min
+                down_min_d = 0
+                has_data = False
             y, m, dd = d.split("-")
             label = dd + " " + RU_MONTHS[int(m)]
             days.append({"date": d, "label": label, "uptime": pct,
-                         "downMin": down_min, "hasData": total > 0})
+                         "downMin": down_min_d, "hasData": has_data})
+
+        # Текущий статус группы — по самому свежему члену (он сейчас активен в роутинге)
+        members_by_freshness = sorted(members, key=lambda x: x[3], reverse=True)
+        canon_sid, canon_online, canon_latency, canon_ts, _ = members_by_freshness[0]
+
+        is_hidden = name in hidden
+        active = (any(m[3] >= last_poll_ts for m in members)
+                  if last_poll_ts else True)
+        visible_public = active and not is_hidden
+        # Публике скрытые и отсутствующие в чекере не показываем; в заголовочную
+        # статистику тоже идут только видимые.
+        if not admin and not visible_public:
+            continue
+
         up30 = round(s_up / s_total * 100, 2) if s_total else None
-        if ts and ts > last_ts:
-            last_ts = ts
-        if online:
-            online_count += 1
-            if latency > 0:
-                lat_vals.append(latency)
+        if visible_public:
+            visible_count += 1
+            if canon_ts and canon_ts > last_ts:
+                last_ts = canon_ts
+            if canon_online:
+                online_count += 1
+                if canon_latency > 0:
+                    lat_vals.append(canon_latency)
+            tot_up += s_up
+            tot_total += s_total
+            tot_down_min += s_down_min
         cc = detect_country(name)
-        out_servers.append({
-            "sid": sid, "name": display_name(name, cc), "cc": cc,
-            "online": bool(online), "latencyMs": latency,
-            "uptime30": up30, "downMin30": s_down_min, "days": days,
-        })
-        tot_up += s_up
-        tot_total += s_total
-        tot_down_min += s_down_min
+        entry = {
+            "sid": canon_sid,
+            "name": display_name(name, cc),
+            "cc": cc,
+            "online": bool(canon_online),
+            "latencyMs": canon_latency,
+            "uptime30": up30,
+            "downMin30": s_down_min,
+            "days": days,
+            "members": len(members),
+        }
+        if admin:
+            entry["hidden"] = is_hidden
+            entry["absent"] = not active
+        out_servers.append(entry)
 
     avg_lat = round(sum(lat_vals) / len(lat_vals)) if lat_vals else 0
     totals = {
         "online": online_count,
-        "total": len(servers),
+        "total": visible_count,
         "uptime30": round(tot_up / tot_total * 100, 2) if tot_total else None,
         "avgLatency": avg_lat,
         "downMin30": tot_down_min,
@@ -336,14 +540,38 @@ def _day_payload(sid, ds, is_today):
     end = ds + 86400
     upper = int(time.time()) if is_today else end
     with _lock, conn() as c:
+        # Находим всех членов группы (одноимённые sid'ы) и тянем samples всех сразу.
+        row = c.execute("SELECT name FROM current WHERE sid=?", (sid,)).fetchone()
+        if row:
+            members = [r[0] for r in c.execute(
+                "SELECT sid FROM current WHERE name=?", (row[0],)).fetchall()]
+        else:
+            members = [sid]
+        placeholders = ",".join("?" * len(members))
         rows = c.execute(
-            "SELECT ts,online,latency FROM samples WHERE sid=? AND ts>=? AND ts<? ORDER BY ts",
-            (sid, ds, end)).fetchall()
-    samples = [{"ts": r[0], "online": bool(r[1]), "latency": r[2]} for r in rows]
-    pings = [r[2] for r in rows if r[1] and r[2] > 0]
+            "SELECT ts,online,latency FROM samples "
+            f"WHERE sid IN ({placeholders}) AND ts>=? AND ts<? ORDER BY ts",
+            tuple(members) + (ds, end)).fetchall()
+    # Роллап по ts: если в одну секунду опросилось несколько членов группы —
+    # «любой online → группа online», латентность = минимум среди online-членов.
+    buckets = {}
+    for ts, online, latency in rows:
+        b = buckets.get(ts)
+        if b is None:
+            buckets[ts] = [int(online), int(latency) if online else 0]
+        else:
+            if online:
+                if not b[0]:
+                    b[0] = 1
+                    b[1] = int(latency) if latency > 0 else 0
+                elif latency > 0 and (b[1] == 0 or latency < b[1]):
+                    b[1] = int(latency)
+    samples = [{"ts": ts, "online": bool(buckets[ts][0]), "latency": buckets[ts][1]}
+               for ts in sorted(buckets)]
+    pings = [s["latency"] for s in samples if s["online"] and s["latency"] > 0]
     stats = {
-        "checks": len(rows),
-        "errors": sum(1 for r in rows if not r[1]),
+        "checks": len(samples),
+        "errors": sum(1 for s in samples if not s["online"]),
         "pmin": min(pings) if pings else 0,
         "pavg": round(sum(pings) / len(pings)) if pings else 0,
         "pmax": max(pings) if pings else 0,
@@ -403,6 +631,39 @@ __FAVICON__
 html[data-theme="dark"]{--bg:#16181d; --card:#1f232a; --soft:#23272f; --line:#333a45; --hover:#262b33;
   --tx:#f1f4f9; --tx2:#b2bbc8; --tx3:#8d97a5;
   --ok:#26c089; --warn:#f2b13e; --orange:#ec7242; --bad:#f25c5a; --info:#5b8cff; --shadow:none;}
+/* Claude — тёплая кремовая палитра с фирменным copper-оранжевым акцентом */
+html[data-theme="claude"]{
+  --bg:#F0EEE6; --card:#FAF9F5; --soft:#E8E5DA; --line:#D9D5C6; --hover:#ECE9DD;
+  --tx:#1F1E1D; --tx2:#4B4337; --tx3:#7A7363;
+  --ok:#5F8A56; --warn:#95681A; --orange:#C76A47; --bad:#B44A3A; --info:#C0694D;
+  --shadow:0 1px 2px rgba(50,30,15,.05),0 1px 3px rgba(50,30,15,.04);
+}
+html[data-theme="claude"] body{background:radial-gradient(1200px 600px at 50% -200px,#F5F2E8 0%,#F0EEE6 60%) no-repeat fixed,var(--bg);}
+html[data-theme="claude"] .logo{background:rgba(217,119,87,.13);}
+html[data-theme="claude"] .pill.ok{background:rgba(95,138,86,.14);color:var(--ok);}
+html[data-theme="claude"] .pill.bad{background:rgba(180,74,58,.14);color:var(--bad);}
+html[data-theme="claude"] #lock.lockon{background:rgba(217,119,87,.15);color:var(--info);border-color:rgba(217,119,87,.45);}
+html[data-theme="claude"] .delbtn:hover{background:rgba(180,74,58,.12);color:var(--bad);border-color:var(--bad);}
+html[data-theme="claude"] .item{border-color:#DDD8C8;}
+html[data-theme="claude"] .item:hover{border-color:#C4BDA8;}
+@keyframes pulseClaude{0%{box-shadow:0 0 0 0 rgba(95,138,86,.45);}70%{box-shadow:0 0 0 6px rgba(95,138,86,0);}100%{box-shadow:0 0 0 0 rgba(95,138,86,0);}}
+html[data-theme="claude"] .pill.ok .dot{animation:pulseClaude 2.4s ease-out infinite;}
+/* Claude Code — тёплая тёмная палитра (CLI-вайб) с copper-оранжевым акцентом */
+html[data-theme="claude-dark"]{
+  --bg:#1A1815; --card:#262320; --soft:#2D2A26; --line:#3F3933; --hover:#302C28;
+  --tx:#ECE7D9; --tx2:#B8AE9A; --tx3:#857D6C;
+  --ok:#87A571; --warn:#D9A05B; --orange:#D97757; --bad:#D77565; --info:#D97757;
+  --shadow:none;
+}
+html[data-theme="claude-dark"] body{background:radial-gradient(1400px 700px at 50% -200px,#23201C 0%,#1A1815 60%) no-repeat fixed,var(--bg);}
+html[data-theme="claude-dark"] .logo{background:rgba(217,119,87,.16);}
+html[data-theme="claude-dark"] .pill.ok{background:rgba(135,165,113,.16);color:var(--ok);}
+html[data-theme="claude-dark"] .pill.bad{background:rgba(215,117,101,.18);color:var(--bad);}
+html[data-theme="claude-dark"] #lock.lockon{background:rgba(217,119,87,.18);color:var(--info);border-color:rgba(217,119,87,.5);}
+html[data-theme="claude-dark"] .delbtn:hover{background:rgba(215,117,101,.18);color:var(--bad);border-color:var(--bad);}
+html[data-theme="claude-dark"] .actoggle::before{background:#ECE7D9;}
+@keyframes pulseClaudeDark{0%{box-shadow:0 0 0 0 rgba(135,165,113,.45);}70%{box-shadow:0 0 0 6px rgba(135,165,113,0);}100%{box-shadow:0 0 0 0 rgba(135,165,113,0);}}
+html[data-theme="claude-dark"] .pill.ok .dot{animation:pulseClaudeDark 2.4s ease-out infinite;}
 *{box-sizing:border-box}
 html{overflow-y:scroll;scrollbar-gutter:stable;}
 body{margin:0;background:var(--bg);color:var(--tx);
@@ -487,6 +748,33 @@ body{margin:0;background:var(--bg);color:var(--tx);
 #tip .d{font-weight:600;margin-bottom:4px;}
 #tip .k{color:var(--tx2);line-height:1.5;}
 .skel{color:var(--tx2);font-size:14px;padding:30px 0;text-align:center;}
+.delbtn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;
+  border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--tx3);cursor:pointer;
+  margin-left:2px;transition:background .15s,color .15s,border-color .15s;}
+.delbtn:hover{background:rgba(232,80,80,.12);color:var(--bad);border-color:var(--bad);}
+.delbtn.restore:hover{background:rgba(47,107,255,.12);color:var(--info);border-color:var(--info);}
+.item.ghost{opacity:.5;}
+.item.ghost:hover{opacity:.85;}
+.gbadge{font-size:11px;color:var(--tx3);border:1px solid var(--line);border-radius:6px;padding:1px 7px;margin-left:8px;flex:none;white-space:nowrap;}
+#lock.lockon{background:rgba(47,107,255,.13);color:var(--info);border-color:var(--info);}
+.adminbar{display:flex;flex-direction:column;
+  background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:4px 16px;margin-bottom:18px;box-shadow:var(--shadow);
+  animation:fadeUp .34s ease both;}
+.adminrow{display:flex;align-items:center;gap:16px;padding:12px 0;}
+.adminrow + .adminrow{border-top:1px solid var(--line);}
+.adminlabel{flex:1;font-size:14px;color:var(--tx);min-width:0;}
+.adminlabel small{display:block;font-size:12.5px;color:var(--tx3);margin-top:2px;font-weight:400;}
+.adminlabel.aclocked small{color:var(--bad);}
+.actoggle{position:relative;width:48px;height:28px;border-radius:999px;flex:none;
+  background:var(--line);border:0;cursor:pointer;padding:0;
+  transition:background .18s ease;}
+.actoggle::before{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;
+  border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(18,28,45,.18);
+  transition:transform .22s ease;}
+.actoggle.actogon{background:var(--ok);}
+.actoggle.actogon::before{transform:translateX(20px);}
+.actoggle:disabled{opacity:.45;cursor:not-allowed;}
 @media (max-width:560px){
   .wrap{padding:22px 14px 40px;}
   .brand h1{font-size:18px;} .brand p{font-size:12px;}
@@ -496,6 +784,7 @@ body{margin:0;background:var(--bg);color:var(--tx);
   .label{width:auto;flex:1 1 auto;min-width:0;}
   .stat2{width:auto;text-align:right;}
   .chev{order:4;}
+  .delbtn{order:3;}
   .bars{order:5;flex-basis:100%;height:26px;}
   .legend{gap:9px 14px;margin-top:14px;} .legend .right{display:none;}
   .tstats{gap:12px 22px;} .panel{padding:0 14px;}
@@ -513,6 +802,7 @@ body{margin:0;background:var(--bg);color:var(--tx);
     </div>
     <div class="topr">
       <div id="overall" class="pill ok"><span class="dot"></span><span>Загрузка…</span></div>
+      <button id="lock" class="tbtn" hidden aria-label="Админ-режим" title="Админ-режим"></button>
       <button id="theme-btn" class="tbtn" aria-label="Сменить тему" title="Сменить тему"></button>
     </div>
   </div>
@@ -520,6 +810,29 @@ body{margin:0;background:var(--bg);color:var(--tx);
     <div class="stat"><div class="l">Серверов онлайн</div><div class="v" id="s-online">—</div></div>
     <div class="stat"><div class="l">Аптайм за __DAYS__ дн</div><div class="v" id="s-uptime">—</div></div>
     <div class="stat"><div class="l">Средний пинг</div><div class="v" id="s-ping">—</div></div>
+  </div>
+  <div id="adminbar" class="adminbar" hidden>
+    <div class="adminrow">
+      <div id="adminlabel" class="adminlabel">
+        Авто-удаление устаревших записей
+        <small id="ac-sub">через <b id="ac-hours">—</b> ч после исчезновения из чекера</small>
+      </div>
+      <button id="ac-toggle" class="actoggle" type="button" aria-label="Авто-удаление"></button>
+    </div>
+    <div class="adminrow">
+      <div id="sg-label" class="adminlabel">
+        Подтверждать глобальные сбои чекера (антидребезг)
+        <small id="sg-sub">когда офлайн все разом — держим цикл до подтверждения (разовый сбой не пишем, длящийся — пишем)</small>
+      </div>
+      <button id="sg-toggle" class="actoggle" type="button" aria-label="Подтверждать глобальные сбои"></button>
+    </div>
+    <div class="adminrow">
+      <div class="adminlabel">
+        Показать отсутствующие в чекере
+        <small>серым; их можно удалить из базы вручную</small>
+      </div>
+      <button id="ab-toggle" class="actoggle" type="button" aria-label="Показать отсутствующие"></button>
+    </div>
   </div>
   <div id="list"><div class="skel">Загрузка данных…</div></div>
   <div class="legend">
@@ -729,7 +1042,8 @@ function buildList(data){
   var list=document.getElementById("list");
   list.innerHTML="";nodes={};order=[];
   data.servers.forEach(function(s,idx){
-    var item=document.createElement("div");item.className="item";item._sid=s.sid;
+    var item=document.createElement("div");item.className="item"+((adminMode&&(s.hidden||s.absent))?" ghost":"");item._sid=s.sid;
+    if(adminMode&&s.absent&&!showAbsent)item.style.display="none";
     item.style.animationDelay=Math.min(idx*0.04,0.5)+"s";
     var row=document.createElement("div");row.className="row";
     var flag=s.cc?'<img class="flag" src="https://flagcdn.com/'+s.cc+'.svg" alt="" loading="lazy">':'<span class="flag"></span>';
@@ -761,6 +1075,23 @@ function buildList(data){
     var chev=document.createElement("div");chev.className="chev";
     chev.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
     row.appendChild(label);row.appendChild(bars);row.appendChild(st2);row.appendChild(chev);
+    if(adminMode){
+      var mkbtn=function(cls,title,svg,fn){var b=document.createElement("button");b.type="button";b.className="delbtn"+cls;b.title=title;b.setAttribute("aria-label",title);b.innerHTML=svg;b.addEventListener("click",function(e){e.stopPropagation();fn();});return b;};
+      var badge=function(txt){var sp=document.createElement("span");sp.className="gbadge";sp.textContent=txt;row.appendChild(sp);};
+      var IX='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+      var ITR='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>';
+      var IBK='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-1"/></svg>';
+      if(s.absent){
+        badge("нет в чекере");
+        row.appendChild(mkbtn("","Удалить из базы",ITR,function(){deleteServer(s.sid,s.name,s.members);}));
+      }else if(s.hidden){
+        badge("скрыто");
+        row.appendChild(mkbtn(" restore","Вернуть на страницу",IBK,function(){hideServer(s.sid,s.name,false);}));
+        row.appendChild(mkbtn("","Удалить из базы",ITR,function(){deleteServer(s.sid,s.name,s.members);}));
+      }else{
+        row.appendChild(mkbtn("","Скрыть от пользователей",IX,function(){hideServer(s.sid,s.name,true);}));
+      }
+    }
     var panel=document.createElement("div");panel.className="panel";panel.innerHTML='<div class="empty">Загрузка…</div>';
     row.addEventListener("click",function(){
       if(item.classList.contains("open")){
@@ -773,13 +1104,14 @@ function buildList(data){
     item.appendChild(row);item.appendChild(panel);
     item._dot=label.querySelector(".sdot");item._bars=barArr;item._p=pEl;item._s2=sEl;item._label=label;item._panel=panel;
     applyServer(item,s,data.days);
-    list.appendChild(item);order.push(s.sid);nodes[s.sid]=item;
+    list.appendChild(item);order.push(skey(s));nodes[s.sid]=item;
   });
   built=true;
 }
+function skey(s){return s.sid+"|"+(s.hidden?1:0)+(s.absent?1:0);}
 function sameOrder(data){
   if(!built||order.length!==data.servers.length)return false;
-  for(var i=0;i<order.length;i++)if(order[i]!==data.servers[i].sid)return false;
+  for(var i=0;i<order.length;i++)if(order[i]!==skey(data.servers[i]))return false;
   return true;
 }
 var lastSeen=null;
@@ -794,24 +1126,200 @@ function render(data){
   }
 }
 function load(){
-  fetch("api/summary").then(function(r){return r.json();}).then(render)
+  var _o=(adminMode&&adminToken)?{headers:{"X-Admin-Token":adminToken}}:{};
+  fetch("api/summary",_o).then(function(r){return r.json();}).then(function(d){
+    render(d);
+    if(adminMode)loadAdminSettings();
+    else{var ab=document.getElementById("adminbar");if(ab)ab.hidden=true;}
+  })
   .catch(function(){document.getElementById("list").innerHTML='<div class="skel">Не удалось загрузить данные</div>';});
 }
+var adminEnabled=false, adminMode=false, adminToken="";
+var showAbsent=false;
+try{showAbsent=localStorage.getItem("sp-show-absent")==="1";}catch(e){}
+try{adminToken=localStorage.getItem("sp-admin-token")||"";}catch(e){}
+var LOCK_CLOSED='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+var LOCK_OPEN='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>';
+function setLockUI(){
+  var b=document.getElementById("lock");if(!b)return;
+  if(!adminMode){b.hidden=true;b.classList.remove("lockon");return;}
+  b.hidden=false;b.innerHTML=LOCK_OPEN;b.classList.add("lockon");
+  b.title="Выйти из админ-режима";
+}
+function checkAdmin(cb){
+  if(!adminToken){adminMode=false;setLockUI();if(cb)cb();return;}
+  fetch("api/admin/check",{method:"POST",headers:{"X-Admin-Token":adminToken}})
+    .then(function(r){
+      adminMode=r.ok;
+      if(!r.ok){adminToken="";try{localStorage.removeItem("sp-admin-token");}catch(e){}}
+      setLockUI();if(cb)cb();
+    })
+    .catch(function(){adminMode=false;setLockUI();if(cb)cb();});
+}
+function promptAdminToken(){
+  var t=window.prompt("Введите админ-токен:","");
+  if(t===null)return;
+  t=(t||"").trim();if(!t)return;
+  fetch("api/admin/check",{method:"POST",headers:{"X-Admin-Token":t}})
+    .then(function(r){
+      if(r.ok){
+        adminToken=t;adminMode=true;
+        try{localStorage.setItem("sp-admin-token",t);}catch(e){}
+        setLockUI();built=false;load();
+      }else{
+        window.alert("Неверный токен");
+      }
+    })
+    .catch(function(){window.alert("Не удалось проверить токен");});
+}
+function logoutAdmin(){
+  adminToken="";adminMode=false;
+  try{localStorage.removeItem("sp-admin-token");}catch(e){}
+  setLockUI();var ab=document.getElementById("adminbar");if(ab)ab.hidden=true;
+  built=false;load();
+}
+var autocleanState=null, autocleanLocked=false;
+var skipGlobalState=null, skipGlobalLocked=false;
+function applyToggleUI(id,state){
+  var t=document.getElementById(id);if(!t)return;
+  if(state){t.classList.add("actogon");}else{t.classList.remove("actogon");}
+  t.setAttribute("aria-checked",state?"true":"false");
+}
+function loadAdminSettings(){
+  var ab=document.getElementById("adminbar");if(!ab)return;
+  if(!adminMode){ab.hidden=true;return;}
+  fetch("api/admin/settings",{headers:{"X-Admin-Token":adminToken}})
+    .then(function(r){if(!r.ok){if(r.status===401)logoutAdmin();throw 0;}return r.json();})
+    .then(function(s){
+      // Авто-удаление устаревших записей
+      autocleanState=!!s.autoclean;
+      autocleanLocked=!!s.autocleanLocked;
+      var sub=document.getElementById("ac-sub");
+      var lbl=document.getElementById("adminlabel");
+      if(autocleanLocked){
+        sub.innerHTML='выключено через переменную <code>STALE_AFTER_HOURS=0</code>';
+        lbl.classList.add("aclocked");
+      }else{
+        sub.innerHTML='через <b>'+s.staleHours+'</b> ч после исчезновения из чекера';
+        lbl.classList.remove("aclocked");
+      }
+      document.getElementById("ac-toggle").disabled=autocleanLocked;
+      applyToggleUI("ac-toggle",autocleanState);
+      // Подтверждать глобальные сбои чекера
+      skipGlobalState=!!s.skipGlobal;
+      skipGlobalLocked=!!s.skipGlobalLocked;
+      var sgsub=document.getElementById("sg-sub");
+      var sglbl=document.getElementById("sg-label");
+      if(skipGlobalLocked){
+        sgsub.innerHTML='выключено через переменную <code>GLOBAL_OUTAGE_RATIO&gt;1</code>';
+        sglbl.classList.add("aclocked");
+      }else{
+        var pct=Math.round((s.globalRatio||1)*100);
+        sgsub.innerHTML='когда офлайн ≥ '+pct+'% разом — держим цикл до подтверждения (разовый сбой не пишем, длящийся — пишем)';
+        sglbl.classList.remove("aclocked");
+      }
+      document.getElementById("sg-toggle").disabled=skipGlobalLocked;
+      applyToggleUI("sg-toggle",skipGlobalState);
+      applyToggleUI("ab-toggle",showAbsent);
+      ab.hidden=false;
+    })
+    .catch(function(){});
+}
+function postSetting(key,toggleId,getState,setState,getLocked){
+  if(!adminMode||getLocked())return;
+  var newState=!getState();
+  applyToggleUI(toggleId,newState);
+  var body={};body[key]=newState;
+  fetch("api/admin/settings",{method:"POST",
+    headers:{"X-Admin-Token":adminToken,"Content-Type":"application/json"},
+    body:JSON.stringify(body)})
+    .then(function(r){
+      if(r.ok){setState(newState);}
+      else{applyToggleUI(toggleId,getState());if(r.status===401)logoutAdmin();}
+    })
+    .catch(function(){applyToggleUI(toggleId,getState());});
+}
+(function(){
+  var ac=document.getElementById("ac-toggle");
+  if(ac)ac.addEventListener("click",function(){
+    postSetting("autoclean","ac-toggle",
+      function(){return autocleanState;},function(v){autocleanState=v;},
+      function(){return autocleanLocked;});
+  });
+  var sg=document.getElementById("sg-toggle");
+  if(sg)sg.addEventListener("click",function(){
+    postSetting("skipGlobal","sg-toggle",
+      function(){return skipGlobalState;},function(v){skipGlobalState=v;},
+      function(){return skipGlobalLocked;});
+  });
+})();
+function hideServer(sid,name,hide){
+  fetch("api/admin/hide",{method:"POST",
+    headers:{"X-Admin-Token":adminToken,"Content-Type":"application/json"},
+    body:JSON.stringify({sid:sid,hidden:hide})})
+    .then(function(r){
+      if(r.ok){built=false;load();}
+      else if(r.status===404||r.status===401){window.alert("Сессия истекла. Войдите заново.");logoutAdmin();}
+      else{window.alert("Не удалось применить");}
+    })
+    .catch(function(){window.alert("Сетевая ошибка");});
+}
+function deleteServer(sid,name,members){
+  var n=members||1;
+  var extra=n>1?'\n\nЭто группа из '+n+' sub-серверов одного хоста (роутинг xray-checker) — будут удалены все.':'';
+  if(!window.confirm('Удалить запись «'+name+'»?'+extra+'\n\nНакопленная статистика по ней будет удалена. Если этот сервер ещё есть в подписке xray-checker, при следующем опросе он снова появится — то есть удаление помогает в первую очередь чистить старые дубли, оставшиеся после смены конфига.'))return;
+  fetch("api/admin/delete",{method:"POST",
+    headers:{"X-Admin-Token":adminToken,"Content-Type":"application/json"},
+    body:JSON.stringify({sid:sid})})
+    .then(function(r){
+      if(r.ok){built=false;load();}
+      else if(r.status===401){window.alert("Сессия истекла. Войдите заново.");logoutAdmin();}
+      else{window.alert("Не удалось удалить запись");}
+    })
+    .catch(function(){window.alert("Сетевая ошибка");});
+}
+(function(){
+  var b=document.getElementById("lock");
+  if(b)b.addEventListener("click",function(){adminMode?logoutAdmin():promptAdminToken();});
+  document.addEventListener("keydown",function(e){
+    if(e.ctrlKey&&e.shiftKey&&(e.code==="KeyL"||e.key==="L"||e.key==="l")){e.preventDefault();adminMode?logoutAdmin():promptAdminToken();}
+  });
+  function hashEntry(){if(location.hash==="#admin"&&!adminMode)promptAdminToken();}
+  window.addEventListener("hashchange",hashEntry);
+  hashEntry();
+})();
 (function(){
   var SUN='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
   var MOON='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+  var SPARK='<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2c.4 4.5 2.6 6.7 7 7-4.4.3-6.6 2.5-7 7-.4-4.5-2.6-6.7-7-7 4.4-.3 6.6-2.5 7-7z"/></svg>';
+  var CODE='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l5-5-5-5"/><path d="M11 19h9"/></svg>';
+  var NEXT={light:"dark",dark:"claude",claude:"claude-dark","claude-dark":"light"};
+  var ICON={light:MOON,dark:SPARK,claude:CODE,"claude-dark":SUN};
+  var NAMES={light:"светлая",dark:"тёмная",claude:"Claude","claude-dark":"Claude Code"};
   var btn=document.getElementById("theme-btn");if(!btn)return;
-  function cur(){return document.documentElement.getAttribute("data-theme")||((window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light");}
-  function setIcon(){btn.innerHTML=cur()==="dark"?SUN:MOON;}
+  function cur(){
+    var t=document.documentElement.getAttribute("data-theme");
+    if(t==="light"||t==="dark"||t==="claude"||t==="claude-dark")return t;
+    return (window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";
+  }
+  function setIcon(){var c=cur();btn.innerHTML=ICON[c];btn.title="Тема: "+NAMES[c]+" → "+NAMES[NEXT[c]];}
   function apply(t){document.documentElement.setAttribute("data-theme",t);try{localStorage.setItem("sp-theme",t);}catch(e){}setIcon();}
   setIcon();
-  btn.addEventListener("click",function(){apply(cur()==="dark"?"light":"dark");});
+  btn.addEventListener("click",function(){apply(NEXT[cur()]);});
 })();
 window.addEventListener("resize",function(){
   var ps=document.querySelectorAll(".item.open .panel");
   for(var i=0;i<ps.length;i++)ps[i].style.maxHeight=ps[i].scrollHeight+"px";
 });
-load();
+(function(){
+  var t=document.getElementById("ab-toggle");
+  if(t)t.addEventListener("click",function(){
+    showAbsent=!showAbsent;
+    try{localStorage.setItem("sp-show-absent",showAbsent?"1":"0");}catch(e){}
+    applyToggleUI("ab-toggle",showAbsent);built=false;load();
+  });
+})();
+checkAdmin(load);
 setInterval(function(){if(!document.hidden)load();},60000);
 document.addEventListener("visibilitychange",function(){if(!document.hidden)load();});
 </script>
@@ -821,7 +1329,9 @@ document.addEventListener("visibilitychange",function(){if(!document.hidden)load
 
 _UNIQ_TOKENS = ["tchartwrap", "tcaption", "tchart", "tcanvas", "tscroll",
                 "tyaxis", "tstats", "taxis", "phead", "sdot",
-                "overall", "pgrad"]
+                "overall", "pgrad",
+                "delbtn", "lockon", "lock",
+                "adminbar", "adminrow", "adminlabel", "actoggle", "actogon", "aclocked"]
 _UNIQ_PREFIX = "c" + os.urandom(3).hex()
 
 
@@ -852,12 +1362,43 @@ def page_html():
             .replace("__LOGO__", logo))
 
 
+def _consteq(a, b):
+    if len(a) != len(b):
+        return False
+    r = 0
+    for x, y in zip(a, b):
+        r |= ord(x) ^ ord(y)
+    return r == 0
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
     def version_string(self):
         return SERVER_HEADER
+
+    def _is_admin(self):
+        if not ADMIN_TOKEN:
+            return False
+        tok = self.headers.get("X-Admin-Token", "") or ""
+        return bool(tok) and _consteq(tok, ADMIN_TOKEN)
+
+    def _read_json(self):
+        try:
+            n = int(self.headers.get("Content-Length", "0") or "0")
+        except Exception:
+            n = 0
+        if n <= 0 or n > 65536:
+            return {}
+        try:
+            raw = self.rfile.read(n).decode("utf-8")
+            return json.loads(raw) if raw else {}
+        except Exception:
+            return {}
+
+    def _send_404(self):
+        self._send(404, "Not Found", "text/plain; charset=utf-8")
 
     def _send(self, code, body, ctype, cache=NO_CACHE):
         data = body.encode("utf-8") if isinstance(body, str) else body
@@ -885,7 +1426,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             self._send(200, page_html(), "text/html; charset=utf-8")
         elif path == "/api/summary":
-            self._send(200, json.dumps(build_summary(), ensure_ascii=False),
+            self._send(200, json.dumps(build_summary(admin=self._is_admin()), ensure_ascii=False),
                        "application/json; charset=utf-8")
         elif path == "/api/today":
             qs = parse_qs(parsed.query)
@@ -919,8 +1460,77 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, blob, "font/woff2", STATIC_CACHE)
             else:
                 self._send(404, "Not Found", "text/plain; charset=utf-8")
+        elif path == "/api/admin/settings":
+            if not self._is_admin():
+                self._send_404()
+                return
+            ac = get_setting("autoclean", autoclean_default()) == "1"
+            sg = get_setting("skip_global", skip_global_default()) == "1"
+            self._send(200, json.dumps({
+                "autoclean": ac,
+                "staleHours": STALE_AFTER_HOURS,
+                "autocleanLocked": STALE_AFTER_HOURS <= 0,
+                "skipGlobal": sg,
+                "globalRatio": GLOBAL_OUTAGE_RATIO,
+                "skipGlobalLocked": GLOBAL_OUTAGE_RATIO > 1.0,
+            }, ensure_ascii=False), "application/json; charset=utf-8")
         elif path == "/health":
             self._send(200, "OK", "text/plain; charset=utf-8")
+        else:
+            self._send(404, "Not Found", "text/plain; charset=utf-8")
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/api/admin/check":
+            if self._is_admin():
+                self._send(200, '{"ok":true}',
+                           "application/json; charset=utf-8")
+            else:
+                self._send_404()
+        elif path == "/api/admin/delete":
+            if not self._is_admin():
+                self._send_404()
+                return
+            body = self._read_json()
+            sid = (body.get("sid") if isinstance(body, dict) else None) or ""
+            if not sid:
+                self._send(400, '{"error":"sid required"}',
+                           "application/json; charset=utf-8")
+                return
+            ok = delete_server(sid)
+            self._send(200,
+                       json.dumps({"ok": True, "deleted": ok}, ensure_ascii=False),
+                       "application/json; charset=utf-8")
+        elif path == "/api/admin/hide":
+            if not self._is_admin():
+                self._send_404()
+                return
+            body = self._read_json()
+            sid = (body.get("sid") if isinstance(body, dict) else None) or ""
+            hide = bool(body.get("hidden")) if isinstance(body, dict) else False
+            if not sid:
+                self._send(400, '{"error":"sid required"}',
+                           "application/json; charset=utf-8")
+                return
+            ok = set_hidden(sid, hide)
+            self._send(200,
+                       json.dumps({"ok": True, "applied": ok}, ensure_ascii=False),
+                       "application/json; charset=utf-8")
+        elif path == "/api/admin/settings":
+            if not self._is_admin():
+                self._send_404()
+                return
+            body = self._read_json()
+            if isinstance(body, dict) and "autoclean" in body:
+                set_setting("autoclean", "1" if body["autoclean"] else "0")
+            if isinstance(body, dict) and "skipGlobal" in body:
+                set_setting("skip_global", "1" if body["skipGlobal"] else "0")
+            ac = get_setting("autoclean", autoclean_default()) == "1"
+            sg = get_setting("skip_global", skip_global_default()) == "1"
+            self._send(200, json.dumps({"ok": True, "autoclean": ac, "skipGlobal": sg},
+                                       ensure_ascii=False),
+                       "application/json; charset=utf-8")
         else:
             self._send(404, "Not Found", "text/plain; charset=utf-8")
 
@@ -930,6 +1540,9 @@ def main():
     init_db()
     threading.Thread(target=ensure_fonts, daemon=True).start()
     threading.Thread(target=poller, daemon=True).start()
+    if _ADMIN_TOKEN_TOO_SHORT:
+        print("ВНИМАНИЕ: ADMIN_TOKEN короче %d символов — админ-режим ОТКЛЮЧЁН. "
+              "Сгенерируй надёжный токен:  openssl rand -hex 24" % ADMIN_TOKEN_MIN_LEN, flush=True)
     print("xray-status on :%d, checker=%s, tz=%s" % (PORT, CHECKER_URL, TZ_NAME), flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
