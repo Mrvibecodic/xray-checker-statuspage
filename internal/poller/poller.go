@@ -16,14 +16,15 @@ import (
 )
 
 type Poller struct {
-	cfg      config.Config
-	client   *checker.Client
-	st       *store.Store
-	loc      *time.Location
-	streak   int             // _alldown_streak: счётчик подтверждения глобального сбоя
-	pingHigh map[string]bool // имя группы -> пинг сейчас выше порога
-	onEvent  func(Event)
-	mu       sync.Mutex // сериализует фоновый цикл и RunOnce из бота
+	cfg        config.Config
+	client     *checker.Client
+	st         *store.Store
+	loc        *time.Location
+	streak     int             // _alldown_streak: счётчик подтверждения глобального сбоя
+	pingHigh   map[string]bool // имя группы -> пинг сейчас выше порога
+	downStreak map[string]int  // sid -> сколько офлайн-циклов подряд (анти-флап)
+	onEvent    func(Event)
+	mu         sync.Mutex // сериализует фоновый цикл и RunOnce из бота
 }
 
 func New(cfg config.Config, st *store.Store, client *checker.Client) *Poller {
@@ -108,6 +109,35 @@ func (p *Poller) pollOnce(ctx context.Context) error {
 	if cc, cerr := p.client.FetchConfig(ctx); cerr == nil && cc.CheckInterval >= 10 {
 		_ = p.st.SetSetting("checker_interval", strconv.Itoa(cc.CheckInterval))
 	}
+
+	// Анти-флап по серверам: сервер считаем «упавшим» только со 2-го офлайн-цикла
+	// подряд. Гасит ложные падения, пока чекер прогревается/перечитывает подписку
+	// и часть прокси ещё не протестирована (online=false по умолчанию) — иначе
+	// «часть серверов лежит» сразу после старта, а потом тут же встаёт.
+	if p.downStreak == nil {
+		p.downStreak = map[string]int{}
+	}
+	masked := make([]checker.Proxy, len(proxies))
+	copy(masked, proxies)
+	nextStreak := make(map[string]int, len(masked))
+	for i := range masked {
+		px := &masked[i]
+		if px.StableID == "" {
+			continue
+		}
+		if px.Online {
+			nextStreak[px.StableID] = 0
+			continue
+		}
+		st := p.downStreak[px.StableID] + 1
+		nextStreak[px.StableID] = st
+		if st < 2 {
+			px.Online = true // ещё не подтверждён как упавший — держим онлайн один цикл
+		}
+	}
+	p.downStreak = nextStreak
+	proxies = masked
+
 	now := time.Now()
 	nowLocal := now.In(p.loc)
 	nowUnix := now.Unix()
