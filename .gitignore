@@ -1,0 +1,11 @@
+/statuspage
+*.exe
+/data/
+*.db
+*.db-wal
+*.db-shm
+/dist/
+/vendor/
+.DS_Store
+ПЛАН-go-порт.md
+AGENTS.md

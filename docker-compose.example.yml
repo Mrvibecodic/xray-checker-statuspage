@@ -1,0 +1,45 @@
+services:
+  xray-checker:
+    image: kutovoys/xray-checker
+    container_name: xray-checker
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [statuspage]
+    environment:
+      SUBSCRIPTION_URL: "http://localhost:8081/sub"
+      PROXY_CHECK_INTERVAL: "300"          # частота РЕАЛЬНЫХ проверок прокси (сек) — меняешь здесь
+
+  statuspage:
+    image: ghcr.io/mrvibecodic/xray-checker-statuspage:go-build
+    container_name: statuspage
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      # --- обязательное ---
+      BOT_TOKEN: ""                        # от @BotFather; "" = только страница, без бота
+      BOT_ADMIN_IDS: ""                    # твой id от @userinfobot; несколько — через запятую
+      # --- базовое ---
+      CHECKER_URL: "http://localhost:2112"
+      TZ: "Europe/Moscow"
+      TITLE: "Статус серверов"
+      # --- За своим reverse-proxy (nginx/Caddy/Traefik): раскомментируй, и сервис
+      #     НЕ займёт 80/443 и НЕ будет поднимать TLS сам — этим займётся твой прокси.
+      # PORT: "8080"
+      # TLS_MODE: "off"
+
+      # --- Cloudflare Full (strict): свой Origin Certificate (файлы положи в том /data) ---
+      # TLS_MODE: "file"
+      # CERT_FILE: "/data/origin.pem"
+      # KEY_FILE: "/data/origin.key"
+
+      # --- Домен без Cloudflare-прокси (серт Let's Encrypt напрямую) ---
+      # TLS_MODE: "letsencrypt"
+
+      # --- PostgreSQL вместо встроенного SQLite ---
+      # DB_DRIVER: "postgres"
+      # DB_DSN: "postgres://user:pass@host:5432/db?sslmode=disable"
+    volumes:
+      - status-data:/data
+
+volumes:
+  status-data:

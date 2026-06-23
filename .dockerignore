@@ -1,0 +1,7 @@
+.git
+ПЛАН-go-порт.md
+AGENTS.md
+/data
+*.db
+statuspage
+dist

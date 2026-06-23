@@ -1,0 +1,39 @@
+name: CI
+on:
+  push:
+    branches: [go-build]
+  pull_request:
+    branches: [go-build]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - run: go vet ./...
+      - run: go test ./...
+      - run: CGO_ENABLED=0 go build ./...
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t statuspage:ci --build-arg VERSION=ci .
+      - name: Smoke test image
+        run: |
+          docker run -d --name sp -p 8080:8080 -e BOT_TOKEN= statuspage:ci
+          ok=""
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/healthz || true)
+            if [ "$code" = "200" ]; then ok=1; break; fi
+            sleep 1
+          done
+          if [ -z "$ok" ]; then echo "healthz never became 200"; docker logs sp; docker rm -f sp; exit 1; fi
+          echo "healthz OK"
+          curl -fsS http://localhost:8080/ -o /dev/null && echo "page OK"
+          curl -fsS http://localhost:8080/api/summary -o /dev/null && echo "api OK"
+          docker rm -f sp

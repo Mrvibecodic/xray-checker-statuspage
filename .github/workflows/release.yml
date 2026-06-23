@@ -1,0 +1,65 @@
+name: Release (go-build)
+on:
+  push:
+    branches: [go-build]
+permissions:
+  contents: write
+  packages: write
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Test
+        run: go test ./...
+      - name: Build linux binaries (amd64, arm64)
+        run: |
+          mkdir -p dist
+          VER=$(git rev-parse --short HEAD)
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
+              -ldflags="-s -w -X xray-status/internal/version.Version=go-build-$VER" \
+              -o "dist/statuspage-linux-$arch" ./cmd/statuspage
+            sha256sum "dist/statuspage-linux-$arch" | awk '{print $1}' > "dist/statuspage-linux-$arch.sha256"
+          done
+      - name: Publish rolling release (tag go-build)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: go-build
+          name: go-build (rolling)
+          prerelease: true
+          files: dist/*
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: repo
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - name: Build image
+        run: |
+          VER="go-build-$(git rev-parse --short HEAD)"
+          docker build -t "ghcr.io/${{ steps.repo.outputs.name }}:go-build" --build-arg VERSION="$VER" .
+      - name: Smoke test image before push
+        run: |
+          docker run -d --name sp -p 8080:8080 -e BOT_TOKEN= "ghcr.io/${{ steps.repo.outputs.name }}:go-build"
+          ok=""
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/healthz || true)
+            if [ "$code" = "200" ]; then ok=1; break; fi
+            sleep 1
+          done
+          if [ -z "$ok" ]; then echo "smoke failed"; docker logs sp; docker rm -f sp; exit 1; fi
+          curl -fsS http://localhost:8080/api/summary -o /dev/null && echo "image OK"
+          docker rm -f sp
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push image
+        run: docker push "ghcr.io/${{ steps.repo.outputs.name }}:go-build"
