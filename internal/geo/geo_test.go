@@ -9,6 +9,9 @@ func TestDetectCountry(t *testing.T) {
 		"US New York":     "us",
 		"Финляндия-1":     "fi",
 		"random-host":     "",
+		"Europe":          "eu",
+		"Европа-1":        "eu",
+		"EU Frankfurt":    "de", // конкретный город перебивает «europe»
 	}
 	for in, want := range cases {
 		if got := DetectCountry(in); got != want {
