@@ -294,9 +294,11 @@ func (tb *Bot) answer(ctx context.Context, id string) {
 }
 
 func (tb *Bot) sendSection(ctx context.Context, chatID int64, text string, kb *models.InlineKeyboardMarkup) {
-	if _, err := tb.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML, ReplyMarkup: kb,
-	}); err != nil {
+	p := &bot.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML}
+	if kb != nil {
+		p.ReplyMarkup = kb
+	}
+	if _, err := tb.b.SendMessage(ctx, p); err != nil {
 		slog.Error("telegram send", "err", err)
 	}
 }
@@ -374,13 +376,16 @@ func dueSummary(hhmm string, now time.Time, lastSent string) bool {
 
 // editMessage правит существующее сообщение (текст + клавиатуру).
 func (tb *Bot) editMessage(ctx context.Context, chatID int64, msgID int, text string, kb *models.InlineKeyboardMarkup) {
-	if _, err := tb.b.EditMessageText(ctx, &bot.EditMessageTextParams{
-		ChatID:      chatID,
-		MessageID:   msgID,
-		Text:        text,
-		ParseMode:   models.ParseModeHTML,
-		ReplyMarkup: kb,
-	}); err != nil {
+	p := &bot.EditMessageTextParams{
+		ChatID:    chatID,
+		MessageID: msgID,
+		Text:      text,
+		ParseMode: models.ParseModeHTML,
+	}
+	if kb != nil { // типизированный nil в ReplyMarkup даёт "object expected as reply markup"
+		p.ReplyMarkup = kb
+	}
+	if _, err := tb.b.EditMessageText(ctx, p); err != nil {
 		slog.Error("telegram edit", "err", err)
 	}
 }
@@ -459,9 +464,11 @@ func (tb *Bot) handleAwait(ctx context.Context, chatID int64, await, txt string,
 
 // sendReturnID отправляет сообщение и возвращает его ID (0 при ошибке).
 func (tb *Bot) sendReturnID(ctx context.Context, chatID int64, text string, kb *models.InlineKeyboardMarkup) int {
-	m, err := tb.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML, ReplyMarkup: kb,
-	})
+	p := &bot.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML}
+	if kb != nil {
+		p.ReplyMarkup = kb
+	}
+	m, err := tb.b.SendMessage(ctx, p)
 	if err != nil || m == nil {
 		slog.Error("telegram send", "err", err)
 		return 0
