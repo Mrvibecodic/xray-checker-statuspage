@@ -150,10 +150,11 @@ func (c *Controller) Shutdown(ctx context.Context) {
 	}
 }
 
-// Probe реально проверяет доступность. Если задан домен — бьёт по ВНЕШНЕМУ
-// адресу https://домен/healthz (видит реальную картину снаружи, включая
-// Cloudflare/проброс/серт), иначе локальный порт. Результат кэшируется на 12с,
-// чтобы не тормозить меню.
+// Probe проверяет доступность локально: бьёт по 127.0.0.1:<port>/healthz и
+// считает «работает», если статус < 500. Внешнюю проверку по https://домен
+// сознательно НЕ делаем приговором — за Cloudflare и при hairpin-NAT self-probe
+// часто врёт, хотя страница реально открывается. Результат кэшируется на 5с,
+// чтобы не тормозить отрисовку меню.
 func (c *Controller) Probe() bool {
 	c.mu.Lock()
 	if time.Since(c.probeAt) < 5*time.Second {
@@ -224,7 +225,9 @@ func (c *Controller) tlsConfigFor(d string) (*tls.Config, string, error) {
 		}
 		return &tls.Config{Certificates: []tls.Certificate{cert}}, mode, nil
 	default: // selfsigned
-		cert, err := selfSignedCert(d)
+		// Кэшируем серт в томе данных, чтобы НЕ генерировать новый на каждый
+		// старт/перезапуск веба (и переживать рестарт процесса).
+		cert, err := loadOrCreateSelfSigned(filepath.Join(filepath.Dir(c.cfg.DBPath), "certs"), d)
 		if err != nil {
 			return nil, "selfsigned", err
 		}
