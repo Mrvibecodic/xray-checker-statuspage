@@ -1,6 +1,6 @@
 # xray-status (Go) — ветка `go-build`
 
-![xray-checker-statuspage](landing.jpg)
+![xray-checker-statuspage](go-statuspage.jpg)
 
 Go-порт статуспейджа поверх [xray-checker](https://github.com/kutovoys/xray-checker):
 один статический бинарь, который сам поднимает веб-сервер, опрашивает чекер и
