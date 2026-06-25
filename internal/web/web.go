@@ -39,7 +39,7 @@ var uniqTokens = []string{
 	// (/api/summary) или критичными JS-идентификаторами (см. внутренний аудит).
 	"tchartwrap", "tcaption", "tchart", "tcanvas", "tscroll", "tstats", "taxis", "tyaxis",
 	"inc-tlrow", "inc-card", "inc-title", "inc-status", "inc-time", "inc-sev", "inc-aff",
-	"inc-tlt", "inc-tls", "inc-wrap", "inc-tl", "inc-h",
+	"inc-tlt", "inc-tls", "inc-tl", "inc-h",
 	"mnt-badge", "mnt-line", "maint",
 	"s-online", "s-uptime", "s-ping", "s-fresh",
 	"section-head", "pulseClaudeDark", "pulseClaude",
