@@ -12,6 +12,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"html"
 	"log/slog"
 	"net/http"
@@ -25,7 +26,7 @@ import (
 	"xray-status/internal/summary"
 )
 
-//go:embed assets/index.html.tpl assets/logo.svg assets/flags
+//go:embed assets/index.html.tpl assets/index2.html.tpl assets/logo.svg assets/flags
 var assets embed.FS
 
 // uniqTokens — те же CSS/JS-токены, что рандомизирует Python-версия для
@@ -40,7 +41,8 @@ var uniqTokens = []string{
 	"inc-tlrow", "inc-card", "inc-title", "inc-status", "inc-time", "inc-sev", "inc-aff",
 	"inc-tlt", "inc-tls", "inc-wrap", "inc-tl", "inc-h",
 	"mnt-badge", "mnt-line", "maint",
-	"s-online", "s-uptime", "s-ping",
+	"s-online", "s-uptime", "s-ping", "s-fresh",
+	"section-head", "pulseClaudeDark", "pulseClaude",
 	"stat2", "sdot", "phead", "pgrad", "overall", "topr", "vsub",
 	"item", "row", "panel", "flag", "chev", "bars", "brand", "logo",
 	"legend", "empty", "skel", "pill", "open", "stat", "nm", "dot",
@@ -53,10 +55,11 @@ const (
 )
 
 type Server struct {
-	cfg  config.Config
-	st   *store.Store
-	page []byte
-	logo []byte
+	cfg   config.Config
+	st    *store.Store
+	page  []byte
+	page2 []byte
+	logo  []byte
 }
 
 // New собирает страницу один раз на старте: применяет анти-фингерпринт и
@@ -66,15 +69,21 @@ func New(cfg config.Config, st *store.Store) *Server {
 	if err != nil {
 		panic("embed: index.html.tpl: " + err.Error())
 	}
-	logo, err := assets.ReadFile("assets/logo.svg")
+	tpl2Bytes, err := assets.ReadFile("assets/index2.html.tpl")
 	if err != nil {
-		panic("embed: logo.svg: " + err.Error())
+		panic("embed: index2.html.tpl: " + err.Error())
 	}
 
-	// Только статичная подстановка дней. Анти-фингерпринт (uniquify) и остальные
-	// плейсхолдеры применяются ПО-ЗАПРОСНО в index() — каждая загрузка уникальна.
-	raw := strings.ReplaceAll(string(tplBytes), "__DAYS__", strconv.Itoa(cfg.Days))
-	return &Server{cfg: cfg, st: st, page: []byte(raw), logo: logo}
+	// Дефолтный фавикон/логотип рандомизируется на КАЖДЫЙ старт инстанса — у
+	// массовых копий нет одинакового дефолтного фавикона (анти-фингерпринт).
+	logo := []byte(randomFaviconSVG())
+
+	// Только статичная подстановка дней. Анти-фингерпринт (uniquify), рандомизация
+	// темы и остальные плейсхолдеры применяются ПО-ЗАПРОСНО в index().
+	days := strconv.Itoa(cfg.Days)
+	raw := strings.ReplaceAll(string(tplBytes), "__DAYS__", days)
+	raw2 := strings.ReplaceAll(string(tpl2Bytes), "__DAYS__", days)
+	return &Server{cfg: cfg, st: st, page: []byte(raw), page2: []byte(raw2), logo: logo}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -99,7 +108,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	}
 	theme := s.st.GetSetting("theme", "dark")
 	switch theme {
-	case "light", "dark", "claude", "claude-dark":
+	case "light", "dark", "claude", "claude-dark", "v2":
 	default:
 		theme = "dark"
 	}
@@ -115,10 +124,16 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		logoHTML = `<img src="/favicon.ico?v=` + v + `" alt="">`
 	}
 
-	// АНТИ-ФИНГЕРПРИНТ: независимые случайные имена классов/id на каждый запрос.
-	page := uniquify(string(s.page), uniqTokens)
+	// «Тема 2.0» (v2) — отдельный макет из другого шаблона; light/dark — базовый.
+	src := s.page
+	if theme == "v2" {
+		src = s.page2
+	}
+	// АНТИ-ФИНГЕРПРИНТ: независимые случайные имена классов/id на каждый запрос,
+	// плюс рандомизация имени атрибута темы и его значений (нет константного
+	// html[data-theme="..."]-отпечатка между копиями).
+	page := randomizeTheme(uniquify(string(src), uniqTokens), theme)
 	rep := strings.NewReplacer(
-		"__THEME__", theme,
 		"__TITLE__", html.EscapeString(title),
 		"__SUBTITLE__", html.EscapeString(subtitle),
 		"__DESC__", html.EscapeString(desc),
@@ -279,6 +294,52 @@ func uniqName() string {
 	_, _ = rand.Read(lb[:])
 	n := 4 + randN(6) // 4..9 hex-символов
 	return string(letters[int(lb[0])%len(letters)]) + randHex(n)
+}
+
+// randomizeTheme рандомизирует ИМЯ атрибута темы (data-theme -> data-XXXX) и
+// его ЗНАЧЕНИЯ (light/dark -> случайные), консистентно в CSS-селекторах и в теге
+// <html>. Между копиями нет константного `html[data-theme="dark"]`-отпечатка.
+// Для «темы 2.0» (v2) значение тега не совпадает ни с одним явным селектором —
+// страница падает на :root + @media(prefers-color-scheme) => авто light/dark.
+func randomizeTheme(page, theme string) string {
+	attr := "data-" + randHex(3+randN(3))
+	v := map[string]string{
+		"light":       uniqName(),
+		"dark":        uniqName(),
+		"claude":      uniqName(),
+		"claude-dark": uniqName(),
+	}
+	vSel, ok := v[theme]
+	if !ok { // v2 -> авто (системная light/dark): не совпадает ни с одним селектором
+		vSel = uniqName()
+	}
+	return strings.NewReplacer(
+		`data-theme="light"`, attr+`="`+v["light"]+`"`,
+		`data-theme="dark"`, attr+`="`+v["dark"]+`"`,
+		`data-theme="claude-dark"`, attr+`="`+v["claude-dark"]+`"`,
+		`data-theme="claude"`, attr+`="`+v["claude"]+`"`,
+		`data-theme="__THEME__"`, attr+`="`+vSel+`"`,
+	).Replace(page)
+}
+
+// randomFaviconSVG генерирует уникальный дефолтный фавикон/логотип (на старт
+// инстанса) — простой значок со случайным оттенком/радиусом, чтобы у массовых
+// копий не было одинакового дефолтного фавикона.
+func randomFaviconSVG() string {
+	hue := randN(360)
+	hue2 := (hue + 24 + randN(72)) % 360
+	rx := 8 + randN(10)
+	dot := 8 + randN(7)
+	gid := uniqName()
+	return fmt.Sprintf(
+		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">`+
+			`<defs><linearGradient id="%s" x1="0" y1="0" x2="1" y2="1">`+
+			`<stop offset="0" stop-color="hsl(%d,68%%,53%%)"/>`+
+			`<stop offset="1" stop-color="hsl(%d,66%%,43%%)"/></linearGradient></defs>`+
+			`<rect x="2" y="2" width="60" height="60" rx="%d" fill="url(#%s)"/>`+
+			`<circle cx="32" cy="32" r="%d" fill="#fff" fill-opacity="0.92"/></svg>`,
+		gid, hue, hue2, rx, gid, dot,
+	)
 }
 
 // uniquify заменяет каждый токен на СОБСТВЕННОЕ случайное имя (а не общий
