@@ -218,7 +218,6 @@ function fmtDur(m){
 function pad2(n){return ("0"+n).slice(-2);}
 function localHM(ts){var d=new Date(ts*1000);return pad2(d.getHours())+":"+pad2(d.getMinutes());}
 function localDateHM(ts){var d=new Date(ts*1000);return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate())+" "+pad2(d.getHours())+":"+pad2(d.getMinutes());}
-// время изменений статусов — в часовом поясе смотрящего (по epoch)
 function fmtTime(ts,ds){return localHM(ts);}
 function maintLabel(s){
   if(!s.maintenance)return "";
@@ -518,9 +517,6 @@ function load(){
     render(d);
   })
   .catch(function(){
-    // Разовый сбой опроса (рестарт/таймаут) НЕ должен стирать уже показанные
-    // серверы. Сбрасываем built, чтобы при след. успехе была полная пересборка,
-    // и показываем сообщение только если на странице ещё ничего нет.
     built=false;
     var list=document.getElementById("list");
     if(!list.querySelector(".item")){

@@ -144,13 +144,13 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	s.send(w, r, http.StatusOK, []byte(out), "text/html; charset=utf-8", noCache)
 }
 
-// injectNoise добавляет безвредный случайный «шум» (комментарий, мета-тег,
-// CSS-комментарий, хвостовые пробелы), чтобы байтовый/структурный хеш каждой
-// выдачи отличался — нет стабильного паттерна между копиями.
+// injectNoise добавляет безвредный случайный «шум», чтобы байтовый/структурный
+// хеш каждой выдачи отличался. ПРАВИЛО: в выдаваемую ПОСЕТИТЕЛЮ страницу НЕ
+// добавляем HTML/CSS/JS-комментарии (они видны в исходнике) — энтропию даёт
+// случайный <meta> и переменный хвост из пробелов/переводов строк.
 func injectNoise(page string) string {
-	page = strings.Replace(page, "<head>", "<head>\n<!--"+randHex(8+randN(20))+"-->\n<meta name=\""+randHex(4)+"\" content=\""+randHex(6+randN(10))+"\">", 1)
-	page = strings.Replace(page, "</style>", "/*"+randHex(6+randN(16))+"*/</style>", 1)
-	return page + "\n<!--" + randHex(4+randN(12)) + "-->\n"
+	page = strings.Replace(page, "<head>", "<head>\n<meta name=\""+randHex(4)+"\" content=\""+randHex(6+randN(10))+"\">", 1)
+	return page + strings.Repeat("\n", 1+randN(3)) + strings.Repeat(" ", randN(9))
 }
 
 // randHex — n случайных hex-символов.
