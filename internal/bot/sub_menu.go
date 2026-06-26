@@ -30,7 +30,7 @@ func (tb *Bot) subText() string {
 // subHint — как подключить чекер и чтобы изменения подхватывались без рестарта.
 func (tb *Bot) subHint() string {
 	return "\n<b>Чекеру:</b> <code>SUBSCRIPTION_URL=http://localhost:" + tb.cfg.InternalPort + "/sub</code>\n" +
-		"Чтобы добавление/удаление подхватывалось без рестарта — у чекера <code>SUBSCRIPTION_UPDATE=true</code> и <code>SUBSCRIPTION_UPDATE_INTERVAL</code> (сек)."
+		"Изменения чекер подхватит сам по своему интервалу обновления подписки — рестарт не нужен."
 }
 
 // maskURL прячет токен/путь подписки, оставляя только хост для опознания —

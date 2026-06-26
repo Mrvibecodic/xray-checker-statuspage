@@ -7,8 +7,6 @@ services:
     depends_on: [statuspage]
     environment:
       SUBSCRIPTION_URL: "http://localhost:8081/sub"
-      SUBSCRIPTION_UPDATE: "true"          # чекер сам перечитывает подписку — добавление/удаление в боте подхватится БЕЗ рестарта
-      SUBSCRIPTION_UPDATE_INTERVAL: "60"   # как часто перечитывать /sub (сек)
       PROXY_CHECK_INTERVAL: "300"          # частота РЕАЛЬНЫХ проверок прокси (сек) — меняешь здесь
 
   statuspage:
