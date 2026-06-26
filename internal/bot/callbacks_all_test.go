@@ -78,7 +78,7 @@ func TestAllCallbacks(t *testing.T) {
 		check("inc "+d, txt, kb)
 	}
 
-	for _, d := range []string{"sub:url"} {
+	for _, d := range []string{"sub:add", "sub:del:0"} {
 		txt, kb := tb.handleSubCallback(1, 10, d)
 		check("sub "+d, txt, kb)
 	}
