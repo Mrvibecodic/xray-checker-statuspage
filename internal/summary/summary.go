@@ -13,6 +13,7 @@ import (
 	"xray-status/internal/config"
 	"xray-status/internal/geo"
 	"xray-status/internal/store"
+	"xray-status/internal/sub"
 )
 
 // pollIntervalFor — действующий интервал (сек): реальный интервал проверок
@@ -92,11 +93,15 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 		m[r.Day] = dayRec{up: r.Up, down: r.Down, downConf: r.DownConf}
 	}
 
-	// Группировка по name + порядок групп по минимальному seq.
+	// Идентичность сервера — stableId, как в оригинальном xray-checker: одинаковая
+	// ремарка в разных подписках = РАЗНЫЕ серверы, каждый своей плиткой. Имя
+	// остаётся как есть и может повторяться (порядок групп — по минимальному seq).
 	groups := map[string][]member{}
+	nameOf := map[string]string{}
 	for _, r := range servers {
-		groups[r.Name] = append(groups[r.Name],
+		groups[r.SID] = append(groups[r.SID],
 			member{sid: r.SID, online: r.Online, latency: r.Latency, ts: r.TS, seq: r.Seq})
+		nameOf[r.SID] = r.Name
 	}
 	type ng struct {
 		name    string
@@ -104,14 +109,14 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 		minSeq  int
 	}
 	ordered := make([]ng, 0, len(groups))
-	for name, ms := range groups {
+	for sid, ms := range groups {
 		minSeq := math.MaxInt
 		for _, m := range ms {
 			if m.seq < minSeq {
 				minSeq = m.seq
 			}
 		}
-		ordered = append(ordered, ng{name: name, members: ms, minSeq: minSeq})
+		ordered = append(ordered, ng{name: nameOf[sid], members: ms, minSeq: minSeq})
 	}
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].minSeq < ordered[j].minSeq })
 
@@ -200,10 +205,13 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 			totDownMin += sDownMin
 		}
 
-		cc := geo.DetectCountry(g.name)
+		// Имя для показа — без тега разведения дублей (тег нужен только для
+		// поштучного управления из бота и фильтрации подписки).
+		base := sub.StripTag(g.name)
+		cc := geo.DetectCountry(base)
 		entry := map[string]any{
 			"sid":         canon.sid,
-			"name":        geo.DisplayName(g.name, cc),
+			"name":        geo.DisplayName(base, cc),
 			"cc":          cc,
 			"online":      canon.online == 1,
 			"latencyMs":   canon.latency,
@@ -254,8 +262,9 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 		// SVG на странице, как в основном списке — без «DE»-букв на Windows).
 		affList := make([]any, 0, len(in.Affected))
 		for _, an := range in.Affected {
-			acc := geo.DetectCountry(an)
-			affList = append(affList, map[string]any{"name": geo.DisplayName(an, acc), "cc": acc})
+			ab := sub.StripTag(an)
+			acc := geo.DetectCountry(ab)
+			affList = append(affList, map[string]any{"name": geo.DisplayName(ab, acc), "cc": acc})
 		}
 		ups, _ := st.IncidentUpdates(in.ID)
 		upArr := make([]any, 0, len(ups))

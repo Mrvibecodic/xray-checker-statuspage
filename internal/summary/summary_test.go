@@ -41,33 +41,45 @@ func TestBuildSummaryGroupingAndUptime(t *testing.T) {
 		t.Fatal(err)
 	}
 	servers := p["servers"].([]any)
-	if len(servers) != 3 {
-		t.Fatalf("want 3 groups, got %d", len(servers))
+	// Одинаковая ремарка с разными stableId — РАЗНЫЕ серверы (как в оригинальном
+	// чекере): a1 и a2 теперь две отдельные плитки, а не одна группа.
+	if len(servers) != 4 {
+		t.Fatalf("want 4 servers, got %d", len(servers))
 	}
-	byName := map[string]map[string]any{}
+	bySid := map[string]map[string]any{}
+	nlCount := 0
 	for _, s := range servers {
 		m := s.(map[string]any)
-		byName[m["name"].(string)] = m
+		bySid[m["sid"].(string)] = m
+		if m["name"].(string) == "Amsterdam" {
+			nlCount++
+		}
 	}
-	nl := byName["Amsterdam"]
-	if nl == nil {
-		t.Fatal("NL group not found / display name wrong")
+	if nlCount != 2 {
+		t.Errorf("two NL tiles expected, got %d", nlCount)
 	}
-	if nl["members"].(int) != 2 {
-		t.Errorf("NL members=%v want 2", nl["members"])
+	a1, a2 := bySid["a1"], bySid["a2"]
+	if a1 == nil || a2 == nil {
+		t.Fatal("NL tiles a1/a2 not found by sid")
 	}
-	if nl["cc"].(string) != "nl" {
-		t.Errorf("NL cc=%v want nl", nl["cc"])
+	if a1["members"].(int) != 1 || a2["members"].(int) != 1 {
+		t.Errorf("each NL tile should have 1 member: a1=%v a2=%v", a1["members"], a2["members"])
 	}
-	if nl["uptime30"].(float64) != 50 {
-		t.Errorf("NL uptime30=%v want 50", nl["uptime30"])
+	if a1["online"].(bool) != true || a2["online"].(bool) != false {
+		t.Errorf("a1 online want true (got %v), a2 online want false (got %v)", a1["online"], a2["online"])
 	}
-	if byName["New York"]["uptime30"].(float64) != 0 {
-		t.Errorf("US uptime30 want 0")
+	if a1["cc"].(string) != "nl" {
+		t.Errorf("NL cc=%v want nl", a1["cc"])
+	}
+	if a1["uptime30"].(float64) != 100 {
+		t.Errorf("a1 uptime30=%v want 100", a1["uptime30"])
+	}
+	if a2["uptime30"].(float64) != 0 {
+		t.Errorf("a2 uptime30=%v want 0", a2["uptime30"])
 	}
 	tot := p["totals"].(map[string]any)
-	if tot["online"].(int) != 2 || tot["total"].(int) != 3 {
-		t.Errorf("totals online/total = %v/%v want 2/3", tot["online"], tot["total"])
+	if tot["online"].(int) != 2 || tot["total"].(int) != 4 {
+		t.Errorf("totals online/total = %v/%v want 2/4", tot["online"], tot["total"])
 	}
 	if tot["avgLatency"].(int) != 65 {
 		t.Errorf("avgLatency=%v want 65", tot["avgLatency"])

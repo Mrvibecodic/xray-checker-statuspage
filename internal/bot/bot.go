@@ -17,6 +17,7 @@ import (
 	"xray-status/internal/config"
 	"xray-status/internal/poller"
 	"xray-status/internal/store"
+	"xray-status/internal/sub"
 	"xray-status/internal/updater"
 )
 
@@ -404,17 +405,23 @@ func (tb *Bot) handleAwait(ctx context.Context, chatID int64, await, txt string,
 	// Подписка и домен требуют опроса/перезапуска (это небыстро) — делаем в фоне,
 	// бот не виснет, и ведём на рабочую панель, а не на пустую.
 	switch await {
-	case "sub_url":
-		_ = cmdSub(tb, []string{"url", txt}, chatID)
+	case "sub_add":
+		added, _ := tb.st.AddSubscriptionURLs(sub.ParseURLs(txt))
+		_ = tb.st.AddAudit(chatID, "sub_added", itoa(added), "", "ok")
+		// остаёмся в режиме добавления — можно слать ещё подписки по одной;
+		// любая кнопка («Готово»/навигация) снимет ожидание (см. onCallback).
+		_ = tb.st.SetBotState(chatID, "await", "sub_add")
+		_ = tb.st.SetBotState(chatID, "await_msg", itoa(oldMsg))
+		doneKB := &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+			{ikb("✅ Готово", "m:sub")},
+		}}
+		head := "➕ Добавлено: " + itoa(added) + ". Пришли ещё или нажми «Готово».\n\n" + tb.subText()
 		if oldMsg > 0 {
-			_, _ = tb.b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: chatID, MessageID: oldMsg})
+			tb.editMessage(ctx, chatID, oldMsg, head, doneKB)
+		} else {
+			tb.sendSection(ctx, chatID, head, doneKB)
 		}
-		sid := tb.sendReturnID(ctx, chatID, "✅ Подписка сохранена. Обновляю статус…", nil)
-		go func() {
-			bg := context.Background()
-			tb.refreshNow(bg) // опросить чекер, не блокируя бота
-			tb.editOrSend(bg, chatID, sid, tb.mainMenuText(), mainMenuKB())
-		}()
+		go func() { tb.refreshNow(context.Background()) }() // опросить чекер в фоне
 		return
 	case "domain":
 		_ = cmdSet(tb.st, []string{"domain", txt})
