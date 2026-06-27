@@ -27,8 +27,8 @@ func (tb *Bot) incidentsKB() *models.InlineKeyboardMarkup {
 	incs, _ := tb.st.ActiveIncidents()
 	for _, in := range incs {
 		title := in.Title
-		if len(title) > 24 {
-			title = title[:24]
+		if r := []rune(title); len(r) > 24 {
+			title = string(r[:24]) + "…"
 		}
 		rows = append(rows, []models.InlineKeyboardButton{
 			ikb("🛠 #"+strconv.FormatInt(in.ID, 10)+" "+title, "inc:open:"+strconv.FormatInt(in.ID, 10)),
