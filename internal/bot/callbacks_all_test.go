@@ -88,6 +88,11 @@ func TestAllCallbacks(t *testing.T) {
 		check("vis "+d, txt, kb)
 	}
 
+	for _, d := range []string{"mute:DE Frankfurt", "mute:pg:0"} {
+		txt, kb := tb.handleMuteCallback(1, d)
+		check("mute "+d, txt, kb)
+	}
+
 	for _, d := range []string{"cl:auto", "cl:h:48", "cl:h:0", "cl:glob", "cl:absent", "cl:abspg:0", "cl:del:de1", "cl:dok:de1"} {
 		txt, kb := tb.handleCleanCallback(1, d)
 		check("clean "+d, txt, kb)

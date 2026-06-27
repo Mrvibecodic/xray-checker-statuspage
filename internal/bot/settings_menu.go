@@ -75,6 +75,7 @@ func (tb *Bot) settingsKB() *models.InlineKeyboardMarkup {
 	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 		{ikb("🔔 Алерт: "+alert, "set:alert"), ikb("📡 Пинг: "+ping, "set:ping")},
 		{ikb("🗓 Сводка: "+sum, "set:sum")},
+		{ikb("🔕 Тихие серверы", "set:mute")},
 		{ikb("◀ Ещё", "m:more")},
 	}}
 }
@@ -118,6 +119,9 @@ func (tb *Bot) handleSettingCallback(uid int64, msgID int, data string) (string,
 	case data == "set:alert":
 		_ = tb.st.SetAlertOnDown(!tb.st.AlertOnDown())
 		return tb.settingsText(), tb.settingsKB()
+	case data == "set:mute":
+		tb.setPage(uid, "mute_pg", 0)
+		return tb.muteText(), tb.muteKB(uid)
 	case data == "set:ping":
 		return "📡 Порог высокого пинга:", pingKB()
 	case len(data) > 9 && data[:9] == "set:ping:":

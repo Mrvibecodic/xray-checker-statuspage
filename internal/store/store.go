@@ -122,6 +122,7 @@ func (s *Store) migrate() error {
 			ts BIGINT, sid TEXT, online BIGINT, latency BIGINT)`,
 		`CREATE INDEX IF NOT EXISTS idx_samples ON samples(sid, ts)`,
 		`CREATE TABLE IF NOT EXISTS hidden(name TEXT PRIMARY KEY)`,
+		`CREATE TABLE IF NOT EXISTS muted(name TEXT PRIMARY KEY)`,
 		`CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT)`,
 		`CREATE TABLE IF NOT EXISTS maintenance(
 			id ` + s.d.pk() + `,

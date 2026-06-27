@@ -279,6 +279,8 @@ func (tb *Bot) onCallback(ctx context.Context, update *models.Update) {
 		text, kb = tb.handleSubCallback(cq.From.ID, msgID, cq.Data)
 	case strings.HasPrefix(cq.Data, "vis:"):
 		text, kb = tb.handleVisCallback(cq.From.ID, cq.Data)
+	case strings.HasPrefix(cq.Data, "mute:"):
+		text, kb = tb.handleMuteCallback(cq.From.ID, cq.Data)
 	case strings.HasPrefix(cq.Data, "cl:"):
 		text, kb = tb.handleCleanCallback(cq.From.ID, cq.Data)
 	default:
@@ -309,6 +311,11 @@ func (tb *Bot) sendSection(ctx context.Context, chatID int64, text string, kb *m
 func (tb *Bot) HandleEvent(e poller.Event) {
 	if tb == nil || tb.b == nil {
 		return
+	}
+	if e.Name != "" {
+		if muted, _ := tb.st.MutedSet(); muted[e.Name] {
+			return // алерты по этому серверу заглушены админом (🔕 Тихие серверы)
+		}
 	}
 	if e.Type == poller.EventServerDown || e.Type == poller.EventServerUp {
 		if !tb.st.AlertOnDown() {
