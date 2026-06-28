@@ -40,6 +40,9 @@ func New(url, shaURL string) *Updater {
 	}
 }
 
+// manualHint — фолбэк-подсказка для ручного обновления (Docker).
+const manualHint = "Обнови вручную: docker compose pull && docker compose up -d"
+
 // CheckResult — итог проверки обновления.
 type CheckResult struct {
 	HasUpdate bool
@@ -62,9 +65,15 @@ func (u *Updater) Check(ctx context.Context, currentVersion string) (CheckResult
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return CheckResult{}, fmt.Errorf("github api: status %d", resp.StatusCode)
+		return CheckResult{}, fmt.Errorf("GitHub ответил %d. %s", resp.StatusCode, manualHint)
 	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return CheckResult{}, fmt.Errorf("не удалось прочитать ответ GitHub. %s", manualHint)
+	}
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return CheckResult{}, fmt.Errorf("пустой ответ от GitHub. %s", manualHint)
+	}
 	var v struct {
 		Sha    string `json:"sha"`
 		Commit struct {
@@ -72,7 +81,7 @@ func (u *Updater) Check(ctx context.Context, currentVersion string) (CheckResult
 		} `json:"commit"`
 	}
 	if err := json.Unmarshal(body, &v); err != nil {
-		return CheckResult{}, err
+		return CheckResult{}, fmt.Errorf("не удалось разобрать ответ GitHub. %s", manualHint)
 	}
 	short := v.Sha
 	if len(short) > 7 {

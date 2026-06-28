@@ -218,11 +218,12 @@ function fmtDur(m){
 function pad2(n){return ("0"+n).slice(-2);}
 function localHM(ts){var d=new Date(ts*1000);return pad2(d.getHours())+":"+pad2(d.getMinutes());}
 function localDateHM(ts){var d=new Date(ts*1000);return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate())+" "+pad2(d.getHours())+":"+pad2(d.getMinutes());}
+function localSmart(ts){var d=new Date(ts*1000),n=new Date();var hm=pad2(d.getHours())+":"+pad2(d.getMinutes());if(d.getFullYear()===n.getFullYear()&&d.getMonth()===n.getMonth()&&d.getDate()===n.getDate())return hm;return pad2(d.getDate())+"."+pad2(d.getMonth()+1)+" "+hm;}
 function fmtTime(ts,ds){return localHM(ts);}
 function maintLabel(s){
   if(!s.maintenance)return "";
   var t="на обслуживании";
-  if(s.maintTo&&s.maintTo>0)t+=" · до "+localHM(s.maintTo);
+  if(s.maintTo&&s.maintTo>0)t+=" · до "+localSmart(s.maintTo);
   return t;
 }
 function escapeHtml(s){var d=document.createElement("div");d.textContent=s;return d.innerHTML;}
@@ -400,7 +401,7 @@ function applyServer(item,s,days){
   if(s.maintenance){
     item._p.textContent="обслуж.";
     item._p.style.color="var(--info)";
-    item._s2.textContent=(s.maintTo&&s.maintTo>0)?("примерно до "+localHM(s.maintTo)):"идут работы";
+    item._s2.textContent=(s.maintTo&&s.maintTo>0)?("примерно до "+localSmart(s.maintTo)):"идут работы";
   }else{
     item._p.textContent=(s.uptime30===null)?"—":s.uptime30.toFixed(2)+"%";
     item._p.style.color=srvUpColor(s.uptime30);
@@ -475,7 +476,7 @@ function renderIncidents(data){
   var stt={investigating:"Расследуем",identified:"Причина найдена",monitoring:"Наблюдаем",resolved:"Устранён"};
   var html="";
   incs.forEach(function(i){var sv=i.severity||"minor";
-    var started=i.startedTs?'<span class="inc-time">🕒 начат '+localHM(i.startedTs)+'</span>':'';
+    var started=i.startedTs?'<span class="inc-time">🕒 начат '+localSmart(i.startedTs)+'</span>':'';
     var aff='';
     if(i.affected&&i.affected.length){
       var ap=i.affected.map(function(a){
@@ -490,7 +491,7 @@ function renderIncidents(data){
       tl='<div class="inc-tl">';
       i.updates.forEach(function(u){
         var body=(u.body&&u.body!=="статус обновлён")?' — '+escapeHtml(u.body):'';
-        tl+='<div class="inc-tlrow"><span class="inc-tlt">'+localHM(u.ts)+'</span><span class="inc-tls">'+escapeHtml(stt[u.status]||u.status||'')+'</span>'+body+'</div>';
+        tl+='<div class="inc-tlrow"><span class="inc-tlt">'+localSmart(u.ts)+'</span><span class="inc-tls">'+escapeHtml(stt[u.status]||u.status||'')+'</span>'+body+'</div>';
       });
       tl+='</div>';
     }
