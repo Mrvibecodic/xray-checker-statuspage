@@ -28,6 +28,8 @@ func themeName(code string) string {
 		return "Claude Code"
 	case "v2":
 		return "тема 2.0"
+	case "minimal":
+		return "минималистичная"
 	default:
 		return "тёмная"
 	}
@@ -85,6 +87,7 @@ func themeKB() *models.InlineKeyboardMarkup {
 		{ikb("🌞 Светлая", "set:theme:light"), ikb("🌙 Тёмная", "set:theme:dark")},
 		{ikb("🟠 Claude", "set:theme:claude"), ikb("🟤 Claude Code", "set:theme:claude-dark")},
 		{ikb("🆕 Тема 2.0", "set:theme:v2")},
+		{ikb("🪶 Минималистичная", "set:theme:minimal")},
 		{ikb("◀ Назад", "m:page")},
 	}}
 }
@@ -142,7 +145,7 @@ func (tb *Bot) handleSettingCallback(uid int64, msgID int, data string) (string,
 	case strings.HasPrefix(data, "set:theme:"):
 		v := data[len("set:theme:"):]
 		switch v {
-		case "light", "dark", "claude", "claude-dark", "v2":
+		case "light", "dark", "claude", "claude-dark", "v2", "minimal":
 			_ = tb.st.SetSetting("theme", v)
 			_ = tb.st.AddAudit(uid, "theme_set", "", v, "ok")
 		}

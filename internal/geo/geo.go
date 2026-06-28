@@ -1,5 +1,4 @@
 // Package geo — определение страны по имени сервера и «чистое» отображаемое имя.
-// Прямой перенос detect_country / display_name / RU_MONTHS из app.py.
 package geo
 
 import (
@@ -7,13 +6,12 @@ import (
 	"strings"
 )
 
-// RUMonths — короткие русские месяцы (индекс 1..12), как в app.py.
+// RUMonths — короткие русские месяцы (индекс 1..12).
 var RUMonths = []string{"", "янв", "фев", "мар", "апр", "май", "июн",
 	"июл", "авг", "сен", "окт", "ноя", "дек"}
 
 type ccKW struct{ kw, cc string }
 
-// countryKeywords — порядок важен: первое совпадение выигрывает (как в Python).
 var countryKeywords = []ccKW{
 	{"netherland", "nl"}, {"нидерланд", "nl"}, {"holland", "nl"}, {"amsterdam", "nl"},
 	{"germany", "de"}, {"герман", "de"}, {"frankfurt", "de"}, {"deutsch", "de"},
@@ -64,16 +62,60 @@ var countryKeywords = []ccKW{
 	{"belgium", "be"}, {"бельги", "be"},
 	{"mexico", "mx"}, {"мексик", "mx"},
 	{"argentina", "ar"}, {"аргентин", "ar"},
-	// Европа/Евросоюз — в самом конце: конкретные страны/города выше выигрывают первыми.
 	{"europe", "eu"}, {"европа", "eu"}, {"евросоюз", "eu"},
 }
 
-// DetectCountry возвращает ISO-код страны по эвристике из имени (или "").
+// DetectCountry: сначала из флаг-эмодзи (любая страна), иначе — словарь (или "").
 func DetectCountry(name string) string {
+	if cc := ccFromFlag(name); cc != "" {
+		return cc
+	}
 	n := strings.ToLower(name)
 	for _, e := range countryKeywords {
 		if strings.Contains(n, e.kw) {
 			return e.cc
+		}
+	}
+	return ""
+}
+
+// availableFlags — коды, под которые есть вшитый SVG (internal/web/assets/flags).
+var availableFlags = map[string]bool{
+	"ad": true, "ae": true, "af": true, "ag": true, "ai": true, "al": true, "am": true, "ao": true, "aq": true, "ar": true, "as": true, "at": true,
+	"au": true, "aw": true, "ax": true, "az": true, "ba": true, "bb": true, "bd": true, "be": true, "bf": true, "bg": true, "bh": true, "bi": true,
+	"bj": true, "bl": true, "bm": true, "bn": true, "bo": true, "bq": true, "br": true, "bs": true, "bt": true, "bv": true, "bw": true, "by": true,
+	"bz": true, "ca": true, "cc": true, "cd": true, "cf": true, "cg": true, "ch": true, "ci": true, "ck": true, "cl": true, "cm": true, "cn": true,
+	"co": true, "cp": true, "cr": true, "cu": true, "cv": true, "cw": true, "cx": true, "cy": true, "cz": true, "de": true, "dg": true, "dj": true,
+	"dk": true, "dm": true, "do": true, "dz": true, "ec": true, "ee": true, "eg": true, "eh": true, "er": true, "es": true, "et": true, "eu": true,
+	"fi": true, "fj": true, "fk": true, "fm": true, "fo": true, "fr": true, "ga": true, "gb": true, "gd": true, "ge": true, "gf": true, "gg": true,
+	"gh": true, "gi": true, "gl": true, "gm": true, "gn": true, "gp": true, "gq": true, "gr": true, "gs": true, "gt": true, "gu": true, "gw": true,
+	"gy": true, "hk": true, "hm": true, "hn": true, "hr": true, "ht": true, "hu": true, "ic": true, "id": true, "ie": true, "il": true, "im": true,
+	"in": true, "io": true, "iq": true, "ir": true, "is": true, "it": true, "je": true, "jm": true, "jo": true, "jp": true, "ke": true, "kg": true,
+	"kh": true, "ki": true, "km": true, "kn": true, "kp": true, "kr": true, "kw": true, "ky": true, "kz": true, "la": true, "lb": true, "lc": true,
+	"li": true, "lk": true, "lr": true, "ls": true, "lt": true, "lu": true, "lv": true, "ly": true, "ma": true, "mc": true, "md": true, "me": true,
+	"mf": true, "mg": true, "mh": true, "mk": true, "ml": true, "mm": true, "mn": true, "mo": true, "mp": true, "mq": true, "mr": true, "ms": true,
+	"mt": true, "mu": true, "mv": true, "mw": true, "mx": true, "my": true, "mz": true, "na": true, "nc": true, "ne": true, "nf": true, "ng": true,
+	"ni": true, "nl": true, "no": true, "np": true, "nr": true, "nu": true, "nz": true, "om": true, "pa": true, "pc": true, "pe": true, "pf": true,
+	"pg": true, "ph": true, "pk": true, "pl": true, "pm": true, "pn": true, "pr": true, "ps": true, "pt": true, "pw": true, "py": true, "qa": true,
+	"re": true, "ro": true, "rs": true, "ru": true, "rw": true, "sa": true, "sb": true, "sc": true, "sd": true, "se": true, "sg": true, "sh": true,
+	"si": true, "sj": true, "sk": true, "sl": true, "sm": true, "sn": true, "so": true, "sr": true, "ss": true, "st": true, "sv": true, "sx": true,
+	"sy": true, "sz": true, "tc": true, "td": true, "tf": true, "tg": true, "th": true, "tj": true, "tk": true, "tl": true, "tm": true, "tn": true,
+	"to": true, "tr": true, "tt": true, "tv": true, "tw": true, "tz": true, "ua": true, "ug": true, "um": true, "un": true, "us": true, "uy": true,
+	"uz": true, "va": true, "vc": true, "ve": true, "vg": true, "vi": true, "vn": true, "vu": true, "wf": true, "ws": true, "xk": true, "ye": true,
+	"yt": true, "za": true, "zm": true, "zw": true,
+}
+
+// ccFromFlag достаёт ISO-код из флаг-эмодзи (пара regional indicator), но только
+// если под него есть вшитый SVG; иначе "" (на странице будет флаг Земли xx.svg).
+func ccFromFlag(name string) string {
+	rs := []rune(name)
+	for i := 0; i+1 < len(rs); i++ {
+		a, b := rs[i], rs[i+1]
+		if a >= 0x1F1E6 && a <= 0x1F1FF && b >= 0x1F1E6 && b <= 0x1F1FF {
+			cc := string([]rune{a - 0x1F1E6 + 'a', b - 0x1F1E6 + 'a'})
+			if availableFlags[cc] {
+				return cc
+			}
 		}
 	}
 	return ""
@@ -86,7 +128,6 @@ func DisplayName(name, cc string) string {
 	if name == "" {
 		return name
 	}
-	// Удаляем regional indicator symbols (флаги): U+1F1E6..U+1F1FF.
 	s := strings.Map(func(r rune) rune {
 		if r >= 0x1F1E6 && r <= 0x1F1FF {
 			return -1

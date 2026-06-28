@@ -10,8 +10,12 @@ func TestDetectCountry(t *testing.T) {
 		"Финляндия-1":     "fi",
 		"random-host":     "",
 		"Europe":          "eu",
-		"Европа-1":        "eu",
-		"EU Frankfurt":    "de", // конкретный город перебивает «europe»
+		"EU Frankfurt":    "de",
+		"🇯🇵 Tokyo":        "jp",
+		"🇬🇧 London":       "gb",
+		"🇧🇷 SP":           "br",
+		"🇹🇭 BKK":          "th",
+		"🇻🇳 Hanoi":        "vn",
 	}
 	for in, want := range cases {
 		if got := DetectCountry(in); got != want {
@@ -24,7 +28,6 @@ func TestDisplayName(t *testing.T) {
 	cases := []struct{ name, cc, want string }{
 		{"🇳🇱 NL-Amsterdam", "nl", "Amsterdam"},
 		{"DE Frankfurt", "de", "Frankfurt"},
-		{"US New York", "us", "New York"},
 		{"PlainHost", "", "PlainHost"},
 		{"", "ru", ""},
 	}

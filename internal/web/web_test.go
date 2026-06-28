@@ -97,3 +97,45 @@ func TestPageRandomizedPerLoad(t *testing.T) {
 		}
 	}
 }
+
+func TestMinimalThemeServed(t *testing.T) {
+	st, err := store.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	_ = st.SetSetting("theme", "minimal")
+	cfg := config.Config{Title: "T", Subtitle: "S", Days: 30, TZ: "UTC", PollInterval: 300}
+	h := New(cfg, st).Handler()
+	get := func() string {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+		if rr.Code != 200 {
+			t.Fatalf("minimal index code %d", rr.Code)
+		}
+		return rr.Body.String()
+	}
+	a, b := get(), get()
+	if a == b {
+		t.Fatal("минимал-тема не рандомизируется между загрузками")
+	}
+	for _, page := range []string{a, b} {
+		for _, must := range []string{"s.name", "d.label", "data.incidents", "data.servers"} {
+			if !strings.Contains(page, must) {
+				t.Errorf("минимал: сломан фрагмент после рандомизации: %q", must)
+			}
+		}
+		if strings.Contains(page, ".inc-card{") {
+			t.Error("минимал: inc-card не префиксован (uniquify не сработал)")
+		}
+		if strings.Contains(page, "s-ping") {
+			t.Error("минимал: остался блок пинга (s-ping)")
+		}
+		if strings.Contains(page, "<!--") {
+			t.Error("минимал: HTML-комментарий в выдаче")
+		}
+		if strings.Contains(page, "/*") {
+			t.Error("минимал: CSS-комментарий в выдаче")
+		}
+	}
+}

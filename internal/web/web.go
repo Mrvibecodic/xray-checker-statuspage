@@ -26,7 +26,7 @@ import (
 	"xray-status/internal/summary"
 )
 
-//go:embed assets/index.html.tpl assets/index2.html.tpl assets/logo.svg assets/flags
+//go:embed assets/index.html.tpl assets/index2.html.tpl assets/index3.html.tpl assets/logo.svg assets/flags
 var assets embed.FS
 
 // uniqTokens — те же CSS/JS-токены, что рандомизирует Python-версия для
@@ -59,6 +59,7 @@ type Server struct {
 	st    *store.Store
 	page  []byte
 	page2 []byte
+	page3 []byte
 	logo  []byte
 }
 
@@ -73,6 +74,10 @@ func New(cfg config.Config, st *store.Store) *Server {
 	if err != nil {
 		panic("embed: index2.html.tpl: " + err.Error())
 	}
+	tpl3Bytes, err := assets.ReadFile("assets/index3.html.tpl")
+	if err != nil {
+		panic("embed: index3.html.tpl: " + err.Error())
+	}
 
 	// Дефолтный фавикон/логотип рандомизируется на КАЖДЫЙ старт инстанса — у
 	// массовых копий нет одинакового дефолтного фавикона (анти-фингерпринт).
@@ -83,7 +88,8 @@ func New(cfg config.Config, st *store.Store) *Server {
 	days := strconv.Itoa(cfg.Days)
 	raw := strings.ReplaceAll(string(tplBytes), "__DAYS__", days)
 	raw2 := strings.ReplaceAll(string(tpl2Bytes), "__DAYS__", days)
-	return &Server{cfg: cfg, st: st, page: []byte(raw), page2: []byte(raw2), logo: logo}
+	raw3 := strings.ReplaceAll(string(tpl3Bytes), "__DAYS__", days)
+	return &Server{cfg: cfg, st: st, page: []byte(raw), page2: []byte(raw2), page3: []byte(raw3), logo: logo}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -108,7 +114,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	}
 	theme := s.st.GetSetting("theme", "dark")
 	switch theme {
-	case "light", "dark", "claude", "claude-dark", "v2":
+	case "light", "dark", "claude", "claude-dark", "v2", "minimal":
 	default:
 		theme = "dark"
 	}
@@ -126,8 +132,11 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 
 	// «Тема 2.0» (v2) — отдельный макет из другого шаблона; light/dark — базовый.
 	src := s.page
-	if theme == "v2" {
+	switch theme {
+	case "v2":
 		src = s.page2
+	case "minimal":
+		src = s.page3
 	}
 	// АНТИ-ФИНГЕРПРИНТ: независимые случайные имена классов/id на каждый запрос,
 	// плюс рандомизация имени атрибута темы и его значений (нет константного
