@@ -218,7 +218,7 @@ function fmtDur(m){
 function pad2(n){return ("0"+n).slice(-2);}
 function localHM(ts){var d=new Date(ts*1000);return pad2(d.getHours())+":"+pad2(d.getMinutes());}
 function localDateHM(ts){var d=new Date(ts*1000);return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate())+" "+pad2(d.getHours())+":"+pad2(d.getMinutes());}
-function localSmart(ts){var d=new Date(ts*1000),n=new Date();var hm=pad2(d.getHours())+":"+pad2(d.getMinutes());if(d.getFullYear()===n.getFullYear()&&d.getMonth()===n.getMonth()&&d.getDate()===n.getDate())return hm;return pad2(d.getDate())+"."+pad2(d.getMonth()+1)+" "+hm;}
+function localSmart(ts){var d=new Date(ts*1000);return pad2(d.getDate())+"."+pad2(d.getMonth()+1)+" "+pad2(d.getHours())+":"+pad2(d.getMinutes());}
 function fmtTime(ts,ds){return localHM(ts);}
 function maintLabel(s){
   if(!s.maintenance)return "";
@@ -401,7 +401,7 @@ function applyServer(item,s,days){
   if(s.maintenance){
     item._p.textContent="обслуж.";
     item._p.style.color="var(--info)";
-    item._s2.textContent=(s.maintTo&&s.maintTo>0)?("примерно до "+localSmart(s.maintTo)):"идут работы";
+    item._s2.textContent=(s.maintTo&&s.maintTo>0)?("≈ до "+localSmart(s.maintTo)):"идут работы";
   }else{
     item._p.textContent=(s.uptime30===null)?"—":s.uptime30.toFixed(2)+"%";
     item._p.style.color=srvUpColor(s.uptime30);
