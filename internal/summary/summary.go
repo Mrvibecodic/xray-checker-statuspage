@@ -96,12 +96,21 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 	// Идентичность сервера — stableId, как в оригинальном xray-checker: одинаковая
 	// ремарка в разных подписках = РАЗНЫЕ серверы, каждый своей плиткой. Имя
 	// остаётся как есть и может повторяться (порядок групп — по минимальному seq).
+	// Ключ группировки: для узлов балансировочной группы (непустой grp) — сама
+	// группа (одна плитка на балансир); иначе — stableId (самостоятельный сервер,
+	// поведение как раньше). Старый чекер не отдаёт grp => всё по sid, без изменений.
 	groups := map[string][]member{}
 	nameOf := map[string]string{}
 	for _, r := range servers {
-		groups[r.SID] = append(groups[r.SID],
+		key := "s:" + r.SID
+		disp := r.Name
+		if r.Grp != "" {
+			key = "g:" + r.Grp
+			disp = r.Grp
+		}
+		groups[key] = append(groups[key],
 			member{sid: r.SID, online: r.Online, latency: r.Latency, ts: r.TS, seq: r.Seq})
-		nameOf[r.SID] = r.Name
+		nameOf[key] = disp
 	}
 	type ng struct {
 		name    string
@@ -163,6 +172,24 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 		sort.SliceStable(ms, func(i, j int) bool { return ms[i].ts > ms[j].ts })
 		canon := ms[0]
 
+		// Агрегат группы: онлайн, если жив хотя бы один узел (это честно отражает
+		// балансир с leastPing — трафик уходит на живой узел); репрезентативная
+		// задержка = минимум среди живых. Для самостоятельного сервера (1 член)
+		// тождественно прежнему поведению по canon.
+		onlineMembers, repLat := 0, 0
+		for _, m := range g.members {
+			if m.online == 1 {
+				onlineMembers++
+				if m.latency > 0 && (repLat == 0 || m.latency < repLat) {
+					repLat = m.latency
+				}
+			}
+		}
+		grpOnline := onlineMembers > 0
+		if repLat == 0 {
+			repLat = canon.latency
+		}
+
 		isHidden := hidden[g.name]
 		isMaint := maint[g.name]
 		active := lastPollTS == 0
@@ -194,10 +221,10 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 			if canon.ts > lastTS {
 				lastTS = canon.ts
 			}
-			if canon.online == 1 {
+			if grpOnline {
 				onlineCount++
-				if canon.latency > 0 {
-					latVals = append(latVals, canon.latency)
+				if repLat > 0 {
+					latVals = append(latVals, repLat)
 				}
 			}
 			totUp += sUp
@@ -210,16 +237,17 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 		base := sub.StripTag(g.name)
 		cc := geo.DetectCountry(base)
 		entry := map[string]any{
-			"sid":         canon.sid,
-			"name":        geo.DisplayName(base, cc),
-			"cc":          cc,
-			"online":      canon.online == 1,
-			"latencyMs":   canon.latency,
-			"uptime30":    up30,
-			"downMin30":   sDownMin,
-			"days":        days,
-			"members":     len(g.members),
-			"maintenance": isMaint,
+			"sid":           canon.sid,
+			"name":          geo.DisplayName(base, cc),
+			"cc":            cc,
+			"online":        grpOnline,
+			"latencyMs":     repLat,
+			"uptime30":      up30,
+			"downMin30":     sDownMin,
+			"days":          days,
+			"members":       len(g.members),
+			"membersOnline": onlineMembers,
+			"maintenance":   isMaint,
 		}
 		if isMaint {
 			entry["maintTo"] = maintWin[g.name]

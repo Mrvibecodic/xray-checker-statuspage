@@ -266,7 +266,7 @@ function applyServer(item,s,days){
   }else{
     item._p.textContent=(s.uptime30===null)?"—":s.uptime30.toFixed(2)+"%";
     item._p.style.color=srvUpColor(s.uptime30);
-    item._s2.textContent=days+" дн";
+    item._s2.textContent=days+" дн"+(s.members>1?" · "+s.membersOnline+"/"+s.members+" узлов":"");
   }
 }
 function buildList(data){

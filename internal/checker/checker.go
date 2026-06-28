@@ -16,8 +16,10 @@ import (
 type Proxy struct {
 	StableID  string `json:"stableId"`
 	Name      string `json:"name"`
+	GroupName string `json:"groupName"` // непусто => узел балансировочной группы (чекер >=1.3.0); пусто на старых чекерах
 	Online    bool   `json:"online"`
 	LatencyMs int    `json:"latencyMs"`
+	LastCheck int64  `json:"lastCheck"` // unix-сек последней проверки узла; 0 на старых чекерах
 }
 
 type Client struct {

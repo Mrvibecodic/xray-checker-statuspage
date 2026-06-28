@@ -224,6 +224,7 @@ func (p *Poller) detectPingEvents(proxies []checker.Proxy, threshold int, maint 
 		return nil
 	}
 	rep := map[string]int{}
+	dispOf := map[string]string{}
 	for _, px := range proxies {
 		if px.StableID == "" || !px.Online || px.LatencyMs <= 0 {
 			continue
@@ -232,22 +233,29 @@ func (p *Poller) detectPingEvents(proxies []checker.Proxy, threshold int, maint 
 		if name == "" {
 			name = px.StableID
 		}
-		if cur, ok := rep[name]; !ok || px.LatencyMs < cur {
-			rep[name] = px.LatencyMs
+		k := groupKey(px.GroupName, name)
+		disp := name
+		if px.GroupName != "" {
+			disp = px.GroupName
+		}
+		dispOf[k] = disp
+		if cur, ok := rep[k]; !ok || px.LatencyMs < cur {
+			rep[k] = px.LatencyMs
 		}
 	}
 	var out []Event
 	newState := map[string]bool{}
-	for name, lat := range rep {
+	for k, lat := range rep {
 		isHigh := lat > threshold
-		newState[name] = isHigh
-		if maint[name] {
+		newState[k] = isHigh
+		disp := dispOf[k]
+		if maint[disp] {
 			continue
 		}
-		if isHigh && !p.pingHigh[name] {
-			out = append(out, Event{Type: EventHighPing, Name: name, Latency: lat, Online: true})
-		} else if !isHigh && p.pingHigh[name] {
-			out = append(out, Event{Type: EventPingOK, Name: name, Latency: lat, Online: true})
+		if isHigh && !p.pingHigh[k] {
+			out = append(out, Event{Type: EventHighPing, Name: disp, Latency: lat, Online: true})
+		} else if !isHigh && p.pingHigh[k] {
+			out = append(out, Event{Type: EventPingOK, Name: disp, Latency: lat, Online: true})
 		}
 	}
 	p.pingHigh = newState

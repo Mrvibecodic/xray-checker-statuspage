@@ -34,19 +34,23 @@ func (p *Poller) detectTransitions(proxies []checker.Proxy, _ int64) []Event {
 	if err != nil {
 		return nil
 	}
-	prev := map[string]bool{}     // name -> online
-	prevSeen := map[string]bool{} // name присутствовал
+	prev := map[string]bool{}     // ключ группы -> online
+	prevSeen := map[string]bool{} // группа присутствовала
 	for _, r := range prevRows {
-		prevSeen[r.Name] = true
+		k := groupKey(r.Grp, r.Name)
+		prevSeen[k] = true
 		if r.Online == 1 {
-			prev[r.Name] = true
+			prev[k] = true
 		}
 	}
 
-	// now: онлайн-состояние групп из свежего опроса.
+	// now: онлайн-состояние групп из свежего опроса. Балансир (непустой grp) —
+	// одна группа на все свои узлы: «онлайн», если жив хотя бы один. Узлы
+	// балансира имеют разные имена, поэтому ключ — именно grp, а не name.
 	now := map[string]bool{}
 	seen := map[string]bool{}
 	order := []string{}
+	dispOf := map[string]string{}
 	for _, px := range proxies {
 		if px.StableID == "" {
 			continue
@@ -55,26 +59,42 @@ func (p *Poller) detectTransitions(proxies []checker.Proxy, _ int64) []Event {
 		if name == "" {
 			name = px.StableID
 		}
-		if !seen[name] {
-			seen[name] = true
-			order = append(order, name)
+		k := groupKey(px.GroupName, name)
+		disp := name
+		if px.GroupName != "" {
+			disp = px.GroupName
+		}
+		if !seen[k] {
+			seen[k] = true
+			order = append(order, k)
+			dispOf[k] = disp
 		}
 		if px.Online {
-			now[name] = true
+			now[k] = true
 		}
 	}
 
 	var out []Event
-	for _, name := range order {
-		if !prevSeen[name] {
+	for _, k := range order {
+		if !prevSeen[k] {
 			continue // новая группа — не алертим на появление
 		}
-		was, is := prev[name], now[name]
+		was, is := prev[k], now[k]
 		if was && !is {
-			out = append(out, Event{Type: EventServerDown, Name: name, Online: false})
+			out = append(out, Event{Type: EventServerDown, Name: dispOf[k], Online: false})
 		} else if !was && is {
-			out = append(out, Event{Type: EventServerUp, Name: name, Online: true})
+			out = append(out, Event{Type: EventServerUp, Name: dispOf[k], Online: true})
 		}
 	}
 	return out
+}
+
+// groupKey — ключ агрегации хоста для алертов: балансировочная группа (непустой
+// grp) считается одним хостом; иначе — отдельный сервер по имени. Префиксы
+// разводят пространства, чтобы grp и name никогда не столкнулись.
+func groupKey(grp, name string) string {
+	if grp != "" {
+		return "g:" + grp
+	}
+	return "n:" + name
 }

@@ -65,12 +65,12 @@ func (s *Store) PollWrite(proxies []checker.Proxy, p PollWriteParams) (cleaned [
 			downConf = 1
 		}
 
-		if _, err = tx.Exec(`INSERT INTO current(sid,name,online,latency,ts,seq)
-			VALUES(?,?,?,?,?,?)
+		if _, err = tx.Exec(`INSERT INTO current(sid,name,grp,online,latency,ts,seq)
+			VALUES(?,?,?,?,?,?,?)
 			ON CONFLICT(sid) DO UPDATE SET
-			  name=excluded.name, online=excluded.online,
+			  name=excluded.name, grp=excluded.grp, online=excluded.online,
 			  latency=excluded.latency, ts=excluded.ts, seq=excluded.seq`,
-			sid, name, online, latency, p.Now, seq); err != nil {
+			sid, name, px.GroupName, online, latency, p.Now, seq); err != nil {
 			return nil, err
 		}
 

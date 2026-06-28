@@ -113,7 +113,7 @@ func (s *Store) migrate() error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS current(
 			sid TEXT PRIMARY KEY, name TEXT, online BIGINT,
-			latency BIGINT, ts BIGINT, seq BIGINT)`,
+			latency BIGINT, ts BIGINT, seq BIGINT, grp TEXT)`,
 		`CREATE TABLE IF NOT EXISTS daily(
 			day TEXT, sid TEXT, up BIGINT DEFAULT 0, down BIGINT DEFAULT 0,
 			lat_sum BIGINT DEFAULT 0, lat_cnt BIGINT DEFAULT 0,
@@ -159,6 +159,12 @@ func (s *Store) migrate() error {
 	} else {
 		_, _ = s.exec(`ALTER TABLE daily ADD COLUMN down_conf BIGINT DEFAULT 0`)
 	}
+	// Совместимость со старой БД без grp (имя группы балансира, чекер >=1.3.0).
+	if s.d.isPG() {
+		_, _ = s.exec(`ALTER TABLE current ADD COLUMN IF NOT EXISTS grp TEXT`)
+	} else {
+		_, _ = s.exec(`ALTER TABLE current ADD COLUMN grp TEXT`)
+	}
 	return nil
 }
 
@@ -192,6 +198,7 @@ func (s *Store) LastPollTS() int64 {
 
 type CurrentRow struct {
 	SID, Name string
+	Grp       string // имя балансировочной группы; пусто => самостоятельный сервер
 	Online    int
 	Latency   int
 	TS        int64
@@ -210,7 +217,7 @@ type SampleRow struct {
 }
 
 func (s *Store) CurrentRows() ([]CurrentRow, error) {
-	rows, err := s.query(`SELECT sid,name,online,latency,ts,seq FROM current ORDER BY seq`)
+	rows, err := s.query(`SELECT sid,name,COALESCE(grp,''),online,latency,ts,seq FROM current ORDER BY seq`)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +225,7 @@ func (s *Store) CurrentRows() ([]CurrentRow, error) {
 	var out []CurrentRow
 	for rows.Next() {
 		var r CurrentRow
-		if err := rows.Scan(&r.SID, &r.Name, &r.Online, &r.Latency, &r.TS, &r.Seq); err != nil {
+		if err := rows.Scan(&r.SID, &r.Name, &r.Grp, &r.Online, &r.Latency, &r.TS, &r.Seq); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
