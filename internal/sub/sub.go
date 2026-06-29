@@ -5,7 +5,9 @@
 package sub
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"net/url"
@@ -117,6 +119,64 @@ func Merge(raws [][]byte, disabled map[string]bool) []byte {
 	}
 	out := strings.Join(keep, "\n")
 	return []byte(base64.StdEncoding.EncodeToString([]byte(out)))
+}
+
+// FilterJSON обрабатывает подписку в формате XRAY_JSON (массив конфигов, который
+// Remnawave отдаёт под UA Happ/1.0). Выкидывает конфиги, чья ремарка (remarks)
+// есть в disabled, и склеивает оставшиеся из всех переданных подписок в один
+// JSON-массив. Второе значение — была ли это вообще JSON-подписка; если нет,
+// вызывающий идёт по base64-пути (Merge). В отличие от share-ссылок, здесь
+// сохраняются routing/balancers — без этого балансеры до чекера не доходят.
+func FilterJSON(raws [][]byte, disabled map[string]bool) ([]byte, bool) {
+	var all []json.RawMessage
+	sawJSON := false
+	for _, raw := range raws {
+		t := bytes.TrimSpace(raw)
+		if len(t) == 0 {
+			continue
+		}
+		var arr []json.RawMessage
+		switch t[0] {
+		case '[':
+			if err := json.Unmarshal(t, &arr); err != nil {
+				continue
+			}
+		case '{':
+			// либо конверт {"data":[...]}, либо одиночный конфиг-объект
+			var env struct {
+				Data []json.RawMessage `json:"data"`
+			}
+			if err := json.Unmarshal(t, &env); err == nil && env.Data != nil {
+				arr = env.Data
+			} else {
+				arr = []json.RawMessage{append([]byte(nil), t...)}
+			}
+		default:
+			continue
+		}
+		sawJSON = true
+		for _, c := range arr {
+			var meta struct {
+				Remarks string `json:"remarks"`
+			}
+			_ = json.Unmarshal(c, &meta)
+			if meta.Remarks != "" && disabled[meta.Remarks] {
+				continue
+			}
+			all = append(all, c)
+		}
+	}
+	if !sawJSON {
+		return nil, false
+	}
+	if all == nil {
+		all = []json.RawMessage{}
+	}
+	out, err := json.Marshal(all)
+	if err != nil {
+		return nil, false
+	}
+	return out, true
 }
 
 // ParseURLs разбивает пользовательский ввод в список URL подписок. Допускает

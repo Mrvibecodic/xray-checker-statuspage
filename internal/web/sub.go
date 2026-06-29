@@ -45,11 +45,18 @@ func (in *Internal) sub(w http.ResponseWriter, r *http.Request) {
 	}
 	// Тянем каждую подписку; недоступную пропускаем, чтобы одна сбойная не
 	// обрушила весь список. 502 — только если не удалось получить ни одной.
+	// UA чекера форвардим апстриму: в json-режиме чекер ходит под "Happ/1.0", и
+	// Remnawave отдаёт XRAY_JSON (с балансерами/роутингом); иначе — обычный
+	// формат (base64 share-ссылки). Пустой UA => дефолт Go => прежнее поведение.
+	ua := r.Header.Get("User-Agent")
 	var raws [][]byte
 	for _, u := range urls {
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u, nil)
 		if err != nil {
 			continue
+		}
+		if ua != "" {
+			req.Header.Set("User-Agent", ua)
 		}
 		resp, err := in.client.Do(req)
 		if err != nil {
@@ -64,6 +71,14 @@ func (in *Internal) sub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	disabled, _ := in.st.DisabledServers()
+	// XRAY_JSON (Remnawave под Happ): фильтруем по ремаркам на уровне JSON и
+	// отдаём JSON как есть — иначе балансеры/роутинг терялись бы при построчном
+	// merge. Не-JSON (base64/plaintext share-ссылки) идут прежним путём.
+	if out, ok := sub.FilterJSON(raws, disabled); ok {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write(out)
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write(sub.Merge(raws, disabled))
 }

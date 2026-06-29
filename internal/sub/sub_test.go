@@ -2,6 +2,7 @@ package sub
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -149,5 +150,47 @@ func TestNames(t *testing.T) {
 	names := Names([]byte("vless://a#NL\nvless://b#DE\nvless://c#NL"))
 	if len(names) != 2 || names[0] != "NL" || names[1] != "DE" {
 		t.Fatalf("names: %v", names)
+	}
+}
+
+func TestFilterJSON_keepsBalancerDropsDisabled(t *testing.T) {
+	// XRAY_JSON-подписка: три конфига, у первого балансер. Отключаем второй.
+	raw := []byte(`[
+	  {"remarks":"Group A","routing":{"balancers":[{"tag":"bal","selector":["proxy"]}]},"outbounds":[{"tag":"proxy"},{"tag":"proxy-2"},{"tag":"direct"}]},
+	  {"remarks":"Group B","outbounds":[{"tag":"proxy"}]},
+	  {"remarks":"Group C","outbounds":[{"tag":"proxy"}]}
+	]`)
+	out, ok := FilterJSON([][]byte{raw}, map[string]bool{"Group B": true})
+	if !ok {
+		t.Fatal("FilterJSON должен распознать JSON-подписку")
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal(out, &arr); err != nil {
+		t.Fatalf("выход не JSON: %v", err)
+	}
+	if len(arr) != 2 {
+		t.Fatalf("ожидалось 2 конфига (отключённый убран), got %d", len(arr))
+	}
+	// балансер сохранён у первого
+	r0 := arr[0]
+	if r0["remarks"] != "Group A" {
+		t.Fatalf("первый конфиг не балансер: %v", r0["remarks"])
+	}
+	if _, hasBal := r0["routing"].(map[string]any)["balancers"]; !hasBal {
+		t.Fatal("routing.balancers потерян — балансер не дошёл бы до чекера")
+	}
+	// отключённого нет
+	for _, c := range arr {
+		if c["remarks"] == "Group B" {
+			t.Fatal("отключённый сервер не должен попасть в выдачу")
+		}
+	}
+}
+
+func TestFilterJSON_base64NotJSON(t *testing.T) {
+	// base64 share-подписка не должна распознаваться как JSON (идём по Merge-пути).
+	b64 := []byte("dmxlc3M6Ly94QGE6MSNB") // base64 of one share-link with remark "A"
+	if _, ok := FilterJSON([][]byte{b64}, nil); ok {
+		t.Fatal("base64-подписка не должна обрабатываться как JSON")
 	}
 }
