@@ -200,6 +200,14 @@ func (p *Poller) pollOnce(ctx context.Context) error {
 	if len(cleaned) > 0 {
 		slog.Info("auto-cleanup", "removed", len(cleaned))
 	}
+	// Схлопываем осиротевшие id одноимённых серверов на актуальный (например,
+	// после смены схемы stableId в чекере) — безопасно для мультиподписок:
+	// объединяются только id, отсутствовавшие в этом опросе.
+	if n, e := p.st.ConsolidateByName(nowUnix); e != nil {
+		slog.Warn("history consolidate", "err", e)
+	} else if n > 0 {
+		slog.Info("history consolidate", "merged", n)
+	}
 	maint, _ := p.st.MaintenanceNames(nowUnix)
 	for _, t := range transitions {
 		if maint[t.Name] {
