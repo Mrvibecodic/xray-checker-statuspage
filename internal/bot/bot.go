@@ -22,12 +22,13 @@ import (
 )
 
 type Bot struct {
-	b      *bot.Bot
-	st     *store.Store
-	cfg    config.Config
-	admins map[int64]bool
-	upd    *updater.Updater
-	web    webStarter
+	b            *bot.Bot
+	st           *store.Store
+	cfg          config.Config
+	admins       map[int64]bool
+	alertTargets map[int64]bool
+	upd          *updater.Updater
+	web          webStarter
 
 	mu       sync.Mutex
 	lastDown map[string]bool // name -> последнее отправленное состояние (true=down)
@@ -67,7 +68,16 @@ func New(cfg config.Config, st *store.Store) (*Bot, error) {
 	for _, id := range cfg.BotAdminIDs {
 		admins[id] = true
 	}
-	tb := &Bot{st: st, cfg: cfg, admins: admins, lastDown: map[string]bool{},
+	// alertTargets — получатели алертов/сводок: админы + доп. чаты/группы из
+	// NOTIFY_CHAT_IDS. Права на управление ботом (admins) сюда НЕ распространяются.
+	alertTargets := map[int64]bool{}
+	for id := range admins {
+		alertTargets[id] = true
+	}
+	for _, id := range cfg.NotifyChatIDs {
+		alertTargets[id] = true
+	}
+	tb := &Bot{st: st, cfg: cfg, admins: admins, alertTargets: alertTargets, lastDown: map[string]bool{},
 		upd: updater.New(cfg.UpdateURL, cfg.UpdateSHA256URL)}
 	b, err := bot.New(cfg.BotToken, bot.WithDefaultHandler(tb.onUpdate))
 	if err != nil {
@@ -337,7 +347,7 @@ func (tb *Bot) HandleEvent(e poller.Event) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	for id := range tb.admins {
+	for id := range tb.alertTargets {
 		tb.reply(ctx, id, text)
 	}
 }
@@ -364,7 +374,7 @@ func (tb *Bot) RunScheduler(ctx context.Context) {
 				lastSent = now.Format("2006-01-02")
 				text := dailySummaryText(tb.st, tb.cfg)
 				sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				for id := range tb.admins {
+				for id := range tb.alertTargets {
 					tb.reply(sctx, id, text)
 				}
 				cancel()
