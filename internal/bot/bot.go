@@ -21,12 +21,19 @@ import (
 	"xray-status/internal/updater"
 )
 
+// alertTarget — получатель широковещательных уведомлений: чат + опц. топик
+// форума (threadID 0 = обычный чат/General).
+type alertTarget struct {
+	chatID   int64
+	threadID int
+}
+
 type Bot struct {
 	b            *bot.Bot
 	st           *store.Store
 	cfg          config.Config
 	admins       map[int64]bool
-	alertTargets map[int64]bool
+	alertTargets []alertTarget
 	upd          *updater.Updater
 	web          webStarter
 
@@ -70,12 +77,21 @@ func New(cfg config.Config, st *store.Store) (*Bot, error) {
 	}
 	// alertTargets — получатели алертов/сводок: админы + доп. чаты/группы из
 	// NOTIFY_CHAT_IDS. Права на управление ботом (admins) сюда НЕ распространяются.
-	alertTargets := map[int64]bool{}
-	for id := range admins {
-		alertTargets[id] = true
+	alertTargets := make([]alertTarget, 0, len(admins)+len(cfg.NotifyTargets))
+	seenTarget := map[string]bool{}
+	addTarget := func(chatID int64, threadID int) {
+		key := strconv.FormatInt(chatID, 10) + ":" + strconv.Itoa(threadID)
+		if seenTarget[key] {
+			return
+		}
+		seenTarget[key] = true
+		alertTargets = append(alertTargets, alertTarget{chatID: chatID, threadID: threadID})
 	}
-	for _, id := range cfg.NotifyChatIDs {
-		alertTargets[id] = true
+	for id := range admins {
+		addTarget(id, 0)
+	}
+	for _, t := range cfg.NotifyTargets {
+		addTarget(t.ChatID, t.ThreadID)
 	}
 	tb := &Bot{st: st, cfg: cfg, admins: admins, alertTargets: alertTargets, lastDown: map[string]bool{},
 		upd: updater.New(cfg.UpdateURL, cfg.UpdateSHA256URL)}
@@ -204,11 +220,16 @@ func (tb *Bot) onUpdate(ctx context.Context, b *bot.Bot, update *models.Update) 
 }
 
 func (tb *Bot) reply(ctx context.Context, chatID int64, text string) {
-	if _, err := tb.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:    chatID,
-		Text:      text,
-		ParseMode: models.ParseModeHTML,
-	}); err != nil {
+	tb.replyTo(ctx, chatID, 0, text)
+}
+
+// replyTo шлёт текст в чат, опционально в топик форума (threadID>0).
+func (tb *Bot) replyTo(ctx context.Context, chatID int64, threadID int, text string) {
+	p := &bot.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML}
+	if threadID > 0 {
+		p.MessageThreadID = threadID
+	}
+	if _, err := tb.b.SendMessage(ctx, p); err != nil {
 		slog.Error("telegram send", "err", err)
 	}
 }
@@ -347,8 +368,8 @@ func (tb *Bot) HandleEvent(e poller.Event) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	for id := range tb.alertTargets {
-		tb.reply(ctx, id, text)
+	for _, t := range tb.alertTargets {
+		tb.replyTo(ctx, t.chatID, t.threadID, text)
 	}
 }
 
@@ -374,8 +395,8 @@ func (tb *Bot) RunScheduler(ctx context.Context) {
 				lastSent = now.Format("2006-01-02")
 				text := dailySummaryText(tb.st, tb.cfg)
 				sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				for id := range tb.alertTargets {
-					tb.reply(sctx, id, text)
+				for _, t := range tb.alertTargets {
+					tb.replyTo(sctx, t.chatID, t.threadID, text)
 				}
 				cancel()
 			}

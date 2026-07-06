@@ -44,7 +44,7 @@ type Config struct {
 	// docker-compose уже был стабильным; в M0/M1 не используются.
 	BotToken      string
 	BotAdminIDs   []int64
-	NotifyChatIDs []int64
+	NotifyTargets []NotifyTarget
 	SecretKey     string
 	ControlCaps   []string
 
@@ -102,6 +102,33 @@ func splitInt64(k string) []int64 {
 	return out
 }
 
+// NotifyTarget — получатель уведомлений: чат/группа/канал и опциональный топик
+// форума (ThreadID). ThreadID 0 => обычный чат или General-топик.
+type NotifyTarget struct {
+	ChatID   int64
+	ThreadID int
+}
+
+// parseNotifyTargets парсит NOTIFY_CHAT_IDS: элементы вида `-100123` или
+// `-100123:42` (chatID:threadID). Разделитель топика — двоеточие; знак минус в
+// chatID не мешает, т.к. ищем ПОСЛЕДНЕЕ двоеточие.
+func parseNotifyTargets(k string) []NotifyTarget {
+	var out []NotifyTarget
+	for _, p := range splitList(k) {
+		chatStr, thread := p, 0
+		if i := strings.LastIndex(p, ":"); i >= 0 {
+			if t, err := strconv.Atoi(strings.TrimSpace(p[i+1:])); err == nil {
+				thread = t
+				chatStr = strings.TrimSpace(p[:i])
+			}
+		}
+		if id, err := strconv.ParseInt(chatStr, 10, 64); err == nil {
+			out = append(out, NotifyTarget{ChatID: id, ThreadID: thread})
+		}
+	}
+	return out
+}
+
 // Load читает конфигурацию из окружения, подставляя дефолты, совместимые с
 // текущей Python-версией (app.py).
 func Load() Config {
@@ -137,7 +164,7 @@ func Load() Config {
 
 		BotToken:      getenv("BOT_TOKEN", ""),
 		BotAdminIDs:   splitInt64("BOT_ADMIN_IDS"),
-		NotifyChatIDs: splitInt64("NOTIFY_CHAT_IDS"),
+		NotifyTargets: parseNotifyTargets("NOTIFY_CHAT_IDS"),
 		SecretKey:     getenv("SECRET_KEY", ""),
 		ControlCaps:   caps,
 
