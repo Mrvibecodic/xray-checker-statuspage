@@ -78,11 +78,6 @@ func main() {
 		}
 	})
 	go pl.Run(ctx)
-	if tb != nil {
-		tb.SetPollNow(pl.RunOnce)
-		go tb.Run(ctx)
-		go tb.RunScheduler(ctx)
-	}
 
 	appHandler := web.New(cfg, st).Handler()
 
@@ -90,9 +85,14 @@ func main() {
 	// запускать/останавливать прослушивание портов «по команде». На старте
 	// поднимаем, если так сохранено (по умолчанию — да, чтобы работало сразу).
 	webc := webctl.New(cfg, st, appHandler)
+
 	if tb != nil {
-		tb.AttachWeb(webc)
+		tb.SetPollNow(pl.RunOnce)
+		tb.AttachWeb(webc) // до go tb.Run — иначе запись tb.web гонится с чтением в обработчиках бота
+		go tb.Run(ctx)
+		go tb.RunScheduler(ctx)
 	}
+
 	if webc.Enabled() {
 		if err := webc.Start(); err != nil {
 			slog.Error("web server start", "err", err)

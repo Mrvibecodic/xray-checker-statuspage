@@ -21,6 +21,16 @@ func flag(cc string) string {
 	return string([]rune{a, b})
 }
 
+// auditRes переводит ошибку записи в поле result журнала аудита: "ok" при
+// успехе, "err" при ошибке — чтобы журнал не фиксировал «ok» для несостоявшегося
+// действия.
+func auditRes(err error) string {
+	if err != nil {
+		return "err"
+	}
+	return "ok"
+}
+
 func htmlEscape(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")

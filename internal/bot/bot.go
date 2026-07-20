@@ -444,8 +444,8 @@ func (tb *Bot) handleAwait(ctx context.Context, chatID int64, await, txt string,
 	// бот не виснет, и ведём на рабочую панель, а не на пустую.
 	switch await {
 	case "sub_add":
-		added, _ := tb.st.AddSubscriptionURLs(sub.ParseURLs(txt))
-		_ = tb.st.AddAudit(chatID, "sub_added", itoa(added), "", "ok")
+		added, addErr := tb.st.AddSubscriptionURLs(sub.ParseURLs(txt))
+		_ = tb.st.AddAudit(chatID, "sub_added", itoa(added), "", auditRes(addErr))
 		// остаёмся в режиме добавления — можно слать ещё подписки по одной;
 		// любая кнопка («Готово»/навигация) снимет ожидание (см. onCallback).
 		_ = tb.st.SetBotState(chatID, "await", "sub_add")
@@ -454,17 +454,30 @@ func (tb *Bot) handleAwait(ctx context.Context, chatID int64, await, txt string,
 			{ikb("✅ Готово", "m:sub")},
 		}}
 		head := "➕ Добавлено: " + itoa(added) + ". Пришли ещё или нажми «Готово».\n\n" + tb.subText()
+		if addErr != nil {
+			head = "⚠️ Не удалось сохранить подписку — попробуй ещё раз.\n\n" + tb.subText()
+		}
 		if oldMsg > 0 {
 			tb.editMessage(ctx, chatID, oldMsg, head, doneKB)
 		} else {
 			tb.sendSection(ctx, chatID, head, doneKB)
 		}
-		go func() { tb.refreshNow(context.Background()) }() // опросить чекер в фоне
+		if addErr == nil {
+			go func() { tb.refreshNow(context.Background()) }() // опросить чекер в фоне
+		}
 		return
 	case "domain":
-		_ = cmdSet(tb.st, []string{"domain", txt})
+		msg := cmdSet(tb.st, []string{"domain", txt})
+		// cmdSet возвращает сообщение об успехе только когда домен реально сохранён;
+		// при пустом/битом вводе — текст ошибки. Не выдаём провал за успех и не
+		// дёргаем рестарт веба зря.
+		ok := strings.HasPrefix(msg, "🌐 Домен сохранён")
 		if oldMsg > 0 {
 			_, _ = tb.b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: chatID, MessageID: oldMsg})
+		}
+		if !ok {
+			tb.sendSection(ctx, chatID, msg, tb.webKB())
+			return
 		}
 		sid := tb.sendReturnID(ctx, chatID, "🌐 Домен сохранён. Перезапускаю веб-сервер…", nil)
 		go func() {
@@ -481,16 +494,13 @@ func (tb *Bot) handleAwait(ctx context.Context, chatID int64, await, txt string,
 	var kb *models.InlineKeyboardMarkup
 	switch await {
 	case "page_title":
-		_ = tb.st.SetSetting("title", txt)
-		_ = tb.st.AddAudit(chatID, "title_set", "", txt, "ok")
+		_ = tb.st.AddAudit(chatID, "title_set", "", txt, auditRes(tb.st.SetSetting("title", txt)))
 		text, kb = tb.pageText(), tb.pageKB()
 	case "page_subtitle":
-		_ = tb.st.SetSetting("subtitle", txt)
-		_ = tb.st.AddAudit(chatID, "subtitle_set", "", txt, "ok")
+		_ = tb.st.AddAudit(chatID, "subtitle_set", "", txt, auditRes(tb.st.SetSetting("subtitle", txt)))
 		text, kb = tb.pageText(), tb.pageKB()
 	case "page_desc":
-		_ = tb.st.SetSetting("description", txt)
-		_ = tb.st.AddAudit(chatID, "desc_set", "", txt, "ok")
+		_ = tb.st.AddAudit(chatID, "desc_set", "", txt, auditRes(tb.st.SetSetting("description", txt)))
 		text, kb = tb.pageText(), tb.pageKB()
 	case "inc_title":
 		// заголовок принят → выбор затронутых серверов (инцидент создаётся

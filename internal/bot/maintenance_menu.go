@@ -100,9 +100,9 @@ func (tb *Bot) handleMaintCallback(uid int64, data string) (string, *models.Inli
 		if name == "" || mins <= 0 {
 			return maintText(tb.st, tb.cfg), maintKB(tb.st, tb.cfg)
 		}
-		_, _ = tb.st.AddMaintenance(name, now, now+int64(mins)*60, "", uid)
+		_, merr := tb.st.AddMaintenance(name, now, now+int64(mins)*60, "", uid)
 		_ = tb.st.DelBotState(uid, "mnt_srv")
-		_ = tb.st.AddAudit(uid, "maint_add", name, strconv.Itoa(mins)+"м", "ok")
+		_ = tb.st.AddAudit(uid, "maint_add", name, strconv.Itoa(mins)+"м", auditRes(merr))
 		return maintText(tb.st, tb.cfg), maintKB(tb.st, tb.cfg)
 	case strings.HasPrefix(data, "mnt:end:"):
 		id, _ := strconv.ParseInt(data[len("mnt:end:"):], 10, 64)

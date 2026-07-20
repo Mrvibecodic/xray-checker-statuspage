@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/go-telegram/bot/models"
+
+	"xray-status/internal/store"
 )
 
 func (tb *Bot) incidentsText() string {
@@ -155,8 +157,8 @@ func (tb *Bot) createIncidentFromState(uid int64, withAff bool) (string, *models
 	if withAff {
 		aff = splitNL(tb.st.GetBotState(uid, "inc_aff"))
 	}
-	_, _ = tb.st.CreateIncident(title, sev, aff, "Инцидент создан", uid, false)
-	_ = tb.st.AddAudit(uid, "incident_new", title, strings.Join(aff, ","), "ok")
+	_, cerr := tb.st.CreateIncident(title, sev, aff, "Инцидент создан", uid, false)
+	_ = tb.st.AddAudit(uid, "incident_new", title, strings.Join(aff, ","), auditRes(cerr))
 	tb.st.DelBotState(uid, "inc_sev")
 	tb.st.DelBotState(uid, "inc_title_txt")
 	tb.st.DelBotState(uid, "inc_aff")
@@ -195,9 +197,12 @@ func (tb *Bot) handleIncCallback(uid int64, msgID int, data string) (string, *mo
 	case strings.HasPrefix(data, "inc:setst:"):
 		parts := strings.SplitN(data, ":", 4)
 		if len(parts) == 4 {
-			id, _ := strconv.ParseInt(parts[2], 10, 64)
-			_ = tb.st.AddIncidentUpdate(id, parts[3], "статус обновлён", uid)
-			return tb.incidentDetail(id), incStatusKB(id)
+			// id должен быть числом, а статус — из канонического набора (кнопки
+			// шлют только его); иначе не пишем мусор в ленту.
+			if id, err := strconv.ParseInt(parts[2], 10, 64); err == nil && contains(store.IncidentStatuses, parts[3]) {
+				_ = tb.st.AddIncidentUpdate(id, parts[3], "статус обновлён", uid)
+				return tb.incidentDetail(id), incStatusKB(id)
+			}
 		}
 		return tb.incidentsText(), tb.incidentsKB()
 	case strings.HasPrefix(data, "inc:resolve:"):

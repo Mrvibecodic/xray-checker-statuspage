@@ -146,8 +146,7 @@ func (tb *Bot) handleSettingCallback(uid int64, msgID int, data string) (string,
 		v := data[len("set:theme:"):]
 		switch v {
 		case "light", "dark", "claude", "claude-dark", "v2", "minimal":
-			_ = tb.st.SetSetting("theme", v)
-			_ = tb.st.AddAudit(uid, "theme_set", "", v, "ok")
+			_ = tb.st.AddAudit(uid, "theme_set", "", v, auditRes(tb.st.SetSetting("theme", v)))
 		}
 		return tb.pageText(), tb.pageKB()
 	case data == "set:title", data == "set:subtitle", data == "set:desc":
@@ -165,8 +164,7 @@ func (tb *Bot) handleSettingCallback(uid int64, msgID int, data string) (string,
 		_ = tb.st.SetBotState(uid, "await_msg", strconv.Itoa(msgID))
 		return "🖼 Пришли картинку фавикона — PNG/SVG/ICO (лучше документом, чтобы без сжатия).", pageCancelKB()
 	case data == "set:favreset":
-		_ = tb.st.DelAsset("favicon")
-		_ = tb.st.AddAudit(uid, "favicon_reset", "", "", "ok")
+		_ = tb.st.AddAudit(uid, "favicon_reset", "", "", auditRes(tb.st.DelAsset("favicon")))
 		return tb.pageText(), tb.pageKB()
 	case data == "set:domain":
 		_ = tb.st.SetBotState(uid, "await", "domain")
