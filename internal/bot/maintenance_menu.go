@@ -61,10 +61,7 @@ func (tb *Bot) maintServersKB(uid int64) *models.InlineKeyboardMarkup {
 			continue
 		}
 		seen[r.Name] = true
-		cb := "mnt:srv:" + r.Name
-		if len(cb) <= 64 {
-			btns = append(btns, ikb(r.Name, cb))
-		}
+		btns = append(btns, ikb(r.Name, "mnt:srv:"+nameTok(r.Name)))
 	}
 	rows := paginateRows(btns, tb.getPage(uid, "mnt_srv_pg"), "mnt:srvpg:")
 	rows = append(rows, []models.InlineKeyboardButton{ikb("◀ Назад", "m:maint")})
@@ -91,7 +88,10 @@ func (tb *Bot) handleMaintCallback(uid int64, data string) (string, *models.Inli
 		tb.setPage(uid, "mnt_srv_pg", atoiSafe(data[len("mnt:srvpg:"):]))
 		return "Выбери сервер для работ:", tb.maintServersKB(uid)
 	case strings.HasPrefix(data, "mnt:srv:"):
-		name := data[len("mnt:srv:"):]
+		name := tb.resolveName(data[len("mnt:srv:"):])
+		if name == "" {
+			return "Выбери сервер для работ:", tb.maintServersKB(uid)
+		}
 		_ = tb.st.SetBotState(uid, "mnt_srv", name)
 		return "Сервер: <b>" + htmlEscape(name) + "</b>\nНа сколько включить обслуживание?", maintDurKB()
 	case strings.HasPrefix(data, "mnt:dur:"):

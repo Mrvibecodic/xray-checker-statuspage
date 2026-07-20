@@ -124,15 +124,11 @@ func (tb *Bot) incAffKB(uid int64) *models.InlineKeyboardMarkup {
 			continue
 		}
 		seen[r.Name] = true
-		cb := "inc:aff:" + r.Name
-		if len(cb) > 64 {
-			continue
-		}
 		label := r.Name
 		if contains(sel, r.Name) {
 			label = "✅ " + label
 		}
-		btns = append(btns, ikb(label, cb))
+		btns = append(btns, ikb(label, "inc:aff:"+nameTok(r.Name)))
 	}
 	rows := paginateRows(btns, tb.getPage(uid, "aff_pg"), "inc:affpg:")
 	done := "✅ Создать"
@@ -183,7 +179,10 @@ func (tb *Bot) handleIncCallback(uid int64, msgID int, data string) (string, *mo
 		tb.setPage(uid, "aff_pg", atoiSafe(data[len("inc:affpg:"):]))
 		return tb.incAffText(uid), tb.incAffKB(uid)
 	case strings.HasPrefix(data, "inc:aff:"):
-		name := data[len("inc:aff:"):]
+		name := tb.resolveName(data[len("inc:aff:"):])
+		if name == "" {
+			return tb.incAffText(uid), tb.incAffKB(uid)
+		}
 		_ = tb.st.SetBotState(uid, "inc_aff", strings.Join(toggleName(splitNL(tb.st.GetBotState(uid, "inc_aff")), name), "\n"))
 		return tb.incAffText(uid), tb.incAffKB(uid)
 	case data == "inc:affdone":

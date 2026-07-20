@@ -22,10 +22,7 @@ func (tb *Bot) visKB(uid int64) *models.InlineKeyboardMarkup {
 		if hidden[r.Name] {
 			mark = "🙈"
 		}
-		cb := "vis:" + r.Name
-		if len(cb) <= 64 {
-			btns = append(btns, ikb(mark+" "+r.Name, cb))
-		}
+		btns = append(btns, ikb(mark+" "+r.Name, "vis:"+nameTok(r.Name)))
 	}
 	rows := paginateRows(btns, tb.getPage(uid, "vis_pg"), "vis:pg:")
 	rows = append(rows, []models.InlineKeyboardButton{ikb("◀ Ещё", "m:more")})
@@ -37,7 +34,10 @@ func (tb *Bot) handleVisCallback(uid int64, data string) (string, *models.Inline
 		tb.setPage(uid, "vis_pg", atoiSafe(data[len("vis:pg:"):]))
 		return tb.visText(), tb.visKB(uid)
 	}
-	name := data[len("vis:"):]
+	name := tb.resolveName(data[len("vis:"):])
+	if name == "" {
+		return tb.visText(), tb.visKB(uid)
+	}
 	hidden, _ := tb.st.HiddenSet()
 	_ = tb.st.SetHiddenName(name, !hidden[name])
 	act := "server_show"

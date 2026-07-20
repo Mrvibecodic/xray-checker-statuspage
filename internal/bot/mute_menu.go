@@ -23,10 +23,7 @@ func (tb *Bot) muteKB(uid int64) *models.InlineKeyboardMarkup {
 		if muted[r.Name] {
 			mark = "🔕"
 		}
-		cb := "mute:" + r.Name
-		if len(cb) <= 64 {
-			btns = append(btns, ikb(mark+" "+r.Name, cb))
-		}
+		btns = append(btns, ikb(mark+" "+r.Name, "mute:"+nameTok(r.Name)))
 	}
 	rows := paginateRows(btns, tb.getPage(uid, "mute_pg"), "mute:pg:")
 	rows = append(rows, []models.InlineKeyboardButton{ikb("◀ Настройки", "set:home")})
@@ -38,7 +35,10 @@ func (tb *Bot) handleMuteCallback(uid int64, data string) (string, *models.Inlin
 		tb.setPage(uid, "mute_pg", atoiSafe(data[len("mute:pg:"):]))
 		return tb.muteText(), tb.muteKB(uid)
 	}
-	name := data[len("mute:"):]
+	name := tb.resolveName(data[len("mute:"):])
+	if name == "" {
+		return tb.muteText(), tb.muteKB(uid)
+	}
 	muted, _ := tb.st.MutedSet()
 	_ = tb.st.SetMutedName(name, !muted[name])
 	act := "server_unmute"
