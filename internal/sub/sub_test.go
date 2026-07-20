@@ -7,47 +7,22 @@ import (
 	"testing"
 )
 
-func TestFilterPlain(t *testing.T) {
-	in := "vless://a@h:443#NL\nvless://b@h:443#DE"
-	out := string(Filter([]byte(in), map[string]bool{"DE": true}))
-	if out != "vless://a@h:443#NL" {
-		t.Fatalf("plain filter: %q", out)
-	}
-}
-
-func TestFilterBase64(t *testing.T) {
-	plain := "vless://a@h:443#NL\nvless://b@h:443#DE"
-	in := base64.StdEncoding.EncodeToString([]byte(plain))
-	out := Filter([]byte(in), map[string]bool{"NL": true})
-	dec, err := base64.StdEncoding.DecodeString(string(out))
-	if err != nil {
-		t.Fatalf("output not base64: %v", err)
-	}
-	if string(dec) != "vless://b@h:443#DE" {
-		t.Fatalf("base64 filter: %q", dec)
-	}
-}
-
 func TestRemarkURLDecode(t *testing.T) {
 	if got := Remark("vless://a@h:443#NL%20Amsterdam"); got != "NL Amsterdam" {
 		t.Fatalf("remark decode: %q", got)
-	}
-	out := string(Filter([]byte("vless://a#NL%20Amsterdam\nvless://b#DE"), map[string]bool{"NL Amsterdam": true}))
-	if out != "vless://b#DE" {
-		t.Fatalf("filter urlencoded remark: %q", out)
 	}
 }
 
 func TestMerge(t *testing.T) {
 	plain := "vless://a@h:443#NL\nvless://b@h:443#DE"
 	b64 := base64.StdEncoding.EncodeToString([]byte("vless://c@h:443#FR\nvless://a@h:443#NL"))
-	out := Merge([][]byte{[]byte(plain), []byte(b64)}, map[string]bool{"DE": true})
+	out := Merge([][]byte{[]byte(plain), []byte(b64)})
 	dec, err := base64.StdEncoding.DecodeString(string(out))
 	if err != nil {
 		t.Fatalf("merge output not base64: %v", err)
 	}
-	// DE отфильтрован, дубль NL схлопнут, порядок сохранён по источникам.
-	want := "vless://a@h:443#NL\nvless://c@h:443#FR"
+	// дубль строки NL схлопнут, порядок сохранён по источникам.
+	want := "vless://a@h:443#NL\nvless://b@h:443#DE\nvless://c@h:443#FR"
 	if string(dec) != want {
 		t.Fatalf("merge = %q, want %q", dec, want)
 	}
@@ -58,7 +33,7 @@ func TestMergeUniquifiesDuplicateRemarks(t *testing.T) {
 	a := "vless://a@h1:443#NL"
 	b := "vless://b@h2:443#NL"
 	c := "vless://c@h3:443#DE" // уникальная — тег не добавляется
-	out := Merge([][]byte{[]byte(a + "\n" + c), []byte(b)}, nil)
+	out := Merge([][]byte{[]byte(a + "\n" + c), []byte(b)})
 	dec, err := base64.StdEncoding.DecodeString(string(out))
 	if err != nil {
 		t.Fatalf("not base64: %v", err)
@@ -88,21 +63,9 @@ func TestMergeUniquifiesDuplicateRemarks(t *testing.T) {
 	}
 
 	// Тег стабилен: повторный вызов даёт те же имена.
-	out2, _ := base64.StdEncoding.DecodeString(string(Merge([][]byte{[]byte(a + "\n" + c), []byte(b)}, nil)))
+	out2, _ := base64.StdEncoding.DecodeString(string(Merge([][]byte{[]byte(a + "\n" + c), []byte(b)})))
 	if string(out2) != string(dec) {
 		t.Fatalf("merge not stable:\n%q\nvs\n%q", out2, dec)
-	}
-
-	// Выключение одного дубля по его тегированному имени убирает ТОЛЬКО его.
-	var nlNames []string
-	for l := range tagged {
-		nlNames = append(nlNames, Remark(l))
-	}
-	dis := map[string]bool{nlNames[0]: true}
-	out3, _ := base64.StdEncoding.DecodeString(string(Merge([][]byte{[]byte(a + "\n" + c), []byte(b)}, dis)))
-	got := splitLines(string(out3))
-	if len(got) != 2 { // один NL выключен, остаётся второй NL + DE
-		t.Fatalf("disable one dup: want 2 lines, got %d (%v)", len(got), got)
 	}
 }
 
@@ -146,21 +109,14 @@ func TestParseURLs(t *testing.T) {
 	}
 }
 
-func TestNames(t *testing.T) {
-	names := Names([]byte("vless://a#NL\nvless://b#DE\nvless://c#NL"))
-	if len(names) != 2 || names[0] != "NL" || names[1] != "DE" {
-		t.Fatalf("names: %v", names)
-	}
-}
-
-func TestFilterJSON_keepsBalancerDropsDisabled(t *testing.T) {
-	// XRAY_JSON-подписка: три конфига, у первого балансер. Отключаем второй.
+func TestFilterJSON_keepsBalancer(t *testing.T) {
+	// XRAY_JSON-подписка: три конфига, у первого балансер — все проходят как есть.
 	raw := []byte(`[
 	  {"remarks":"Group A","routing":{"balancers":[{"tag":"bal","selector":["proxy"]}]},"outbounds":[{"tag":"proxy"},{"tag":"proxy-2"},{"tag":"direct"}]},
 	  {"remarks":"Group B","outbounds":[{"tag":"proxy"}]},
 	  {"remarks":"Group C","outbounds":[{"tag":"proxy"}]}
 	]`)
-	out, ok := FilterJSON([][]byte{raw}, map[string]bool{"Group B": true})
+	out, ok := FilterJSON([][]byte{raw})
 	if !ok {
 		t.Fatal("FilterJSON должен распознать JSON-подписку")
 	}
@@ -168,29 +124,22 @@ func TestFilterJSON_keepsBalancerDropsDisabled(t *testing.T) {
 	if err := json.Unmarshal(out, &arr); err != nil {
 		t.Fatalf("выход не JSON: %v", err)
 	}
-	if len(arr) != 2 {
-		t.Fatalf("ожидалось 2 конфига (отключённый убран), got %d", len(arr))
+	if len(arr) != 3 {
+		t.Fatalf("ожидалось 3 конфига, got %d", len(arr))
 	}
 	// балансер сохранён у первого
-	r0 := arr[0]
-	if r0["remarks"] != "Group A" {
-		t.Fatalf("первый конфиг не балансер: %v", r0["remarks"])
+	if arr[0]["remarks"] != "Group A" {
+		t.Fatalf("первый конфиг не балансер: %v", arr[0]["remarks"])
 	}
-	if _, hasBal := r0["routing"].(map[string]any)["balancers"]; !hasBal {
+	if _, hasBal := arr[0]["routing"].(map[string]any)["balancers"]; !hasBal {
 		t.Fatal("routing.balancers потерян — балансер не дошёл бы до чекера")
-	}
-	// отключённого нет
-	for _, c := range arr {
-		if c["remarks"] == "Group B" {
-			t.Fatal("отключённый сервер не должен попасть в выдачу")
-		}
 	}
 }
 
 func TestFilterJSON_base64NotJSON(t *testing.T) {
 	// base64 share-подписка не должна распознаваться как JSON (идём по Merge-пути).
 	b64 := []byte("dmxlc3M6Ly94QGE6MSNB") // base64 of one share-link with remark "A"
-	if _, ok := FilterJSON([][]byte{b64}, nil); ok {
+	if _, ok := FilterJSON([][]byte{b64}); ok {
 		t.Fatal("base64-подписка не должна обрабатываться как JSON")
 	}
 }

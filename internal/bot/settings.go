@@ -18,33 +18,6 @@ func onOff(b bool) string {
 	return "выкл"
 }
 
-// cmdSettings показывает текущие настройки.
-func cmdSettings(st *store.Store) string {
-	ping := st.PingThreshold()
-	pingStr := "выкл"
-	if ping > 0 {
-		pingStr = fmt.Sprintf("%d мс", ping)
-	}
-	sum := st.DailySummaryTime()
-	if sum == "" {
-		sum = "выкл"
-	}
-	dom := st.PublicDomain()
-	if dom == "" {
-		dom = "(не задан)"
-	}
-	var b strings.Builder
-	b.WriteString("<b>Настройки</b>\n")
-	fmt.Fprintf(&b, "🔔 Алерт при падении: <b>%s</b>\n", onOff(st.AlertOnDown()))
-	fmt.Fprintf(&b, "📡 Порог высокого пинга: <b>%s</b>\n", pingStr)
-	fmt.Fprintf(&b, "🗓 Ежедневная сводка: <b>%s</b>\n", sum)
-	fmt.Fprintf(&b, "🌐 Домен: <b>%s</b>\n", htmlEscape(dom))
-	fmt.Fprintf(&b, "🗄 БД: <b>%s</b>\n\n", st.Driver())
-	b.WriteString("Изменить: /set alert_down on|off · /set ping &lt;мс|off&gt; · " +
-		"/set summary &lt;HH:MM|off&gt; · /set domain &lt;домен&gt;")
-	return b.String()
-}
-
 // cmdSet меняет одну настройку.
 func cmdSet(st *store.Store, args []string) string {
 	if len(args) < 2 {

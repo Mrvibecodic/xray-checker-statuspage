@@ -11,8 +11,8 @@ import (
 )
 
 // Internal — отдельный HTTP-сервер ТОЛЬКО для внутренней docker-сети (порт не
-// публикуется наружу). Отдаёт чекеру отфильтрованную подписку по /sub: серверы,
-// выключенные через бота, в неё не попадают (ПЛАН §8.2, §13).
+// публикуется наружу). Отдаёт чекеру объединённую подписку по /sub: несколько
+// upstream-подписок склеиваются в один список/JSON (ПЛАН §8.2, §13).
 type Internal struct {
 	cfg    config.Config
 	st     *store.Store
@@ -70,15 +70,14 @@ func (in *Internal) sub(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream fetch failed", http.StatusBadGateway)
 		return
 	}
-	disabled, _ := in.st.DisabledServers()
-	// XRAY_JSON (Remnawave под Happ): фильтруем по ремаркам на уровне JSON и
-	// отдаём JSON как есть — иначе балансеры/роутинг терялись бы при построчном
-	// merge. Не-JSON (base64/plaintext share-ссылки) идут прежним путём.
-	if out, ok := sub.FilterJSON(raws, disabled); ok {
+	// XRAY_JSON (Remnawave под Happ): склеиваем конфиги на уровне JSON и отдаём
+	// как есть — иначе балансеры/роутинг терялись бы при построчном merge.
+	// Не-JSON (base64/plaintext share-ссылки) идут прежним путём.
+	if out, ok := sub.FilterJSON(raws); ok {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write(out)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write(sub.Merge(raws, disabled))
+	_, _ = w.Write(sub.Merge(raws))
 }

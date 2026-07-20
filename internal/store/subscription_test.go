@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestSubscriptionAndServerMeta(t *testing.T) {
+func TestSubscriptionURLSecret(t *testing.T) {
 	st, err := Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -25,19 +25,6 @@ func TestSubscriptionAndServerMeta(t *testing.T) {
 	got, _ := st.SubscriptionURL()
 	if got != "https://provider/sub?token=abc" {
 		t.Fatalf("sub url: %q", got)
-	}
-
-	if err := st.SetServerEnabled("DE Frankfurt", false); err != nil {
-		t.Fatal(err)
-	}
-	dis, _ := st.DisabledServers()
-	if !dis["DE Frankfurt"] {
-		t.Fatalf("DE should be disabled: %v", dis)
-	}
-	_ = st.SetServerEnabled("DE Frankfurt", true)
-	dis2, _ := st.DisabledServers()
-	if dis2["DE Frankfurt"] {
-		t.Fatal("DE should be re-enabled")
 	}
 }
 

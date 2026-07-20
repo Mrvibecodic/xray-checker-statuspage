@@ -14,7 +14,7 @@ import (
 	"xray-status/internal/sub"
 )
 
-func TestInternalSubFilters(t *testing.T) {
+func TestInternalSubServes(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "vless://a@h:443#NL\nvless://b@h:443#DE")
 	}))
@@ -27,7 +27,6 @@ func TestInternalSubFilters(t *testing.T) {
 	defer st.Close()
 	_ = st.EnableSecrets("00000000000000000000000000000000000000000000000000000000000000cc")
 	_ = st.SetSubscriptionURL(upstream.URL)
-	_ = st.SetServerEnabled("DE", false)
 
 	in := NewInternal(config.Config{}, st)
 	rr := httptest.NewRecorder()
@@ -39,8 +38,9 @@ func TestInternalSubFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("output not base64: %v (%q)", err, rr.Body.String())
 	}
-	if string(dec) != "vless://a@h:443#NL" {
-		t.Fatalf("filtered sub wrong: %q", dec)
+	got := string(dec)
+	if !strings.Contains(got, "#NL") || !strings.Contains(got, "#DE") {
+		t.Fatalf("both servers should be served: %q", got)
 	}
 
 	// без подписки — 404
@@ -53,7 +53,7 @@ func TestInternalSubFilters(t *testing.T) {
 	}
 }
 
-func TestInternalSubMergesMultipleAndPerServerDisable(t *testing.T) {
+func TestInternalSubMergesMultiple(t *testing.T) {
 	upA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "vless://a@h1:443#NL\nvless://x@h9:443#DE")
 	}))
@@ -74,26 +74,21 @@ func TestInternalSubMergesMultipleAndPerServerDisable(t *testing.T) {
 	}
 
 	in := NewInternal(config.Config{}, st)
-	fetch := func() []string {
-		rr := httptest.NewRecorder()
-		in.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sub", nil))
-		if rr.Code != 200 {
-			t.Fatalf("code %d", rr.Code)
-		}
-		dec, err := base64.StdEncoding.DecodeString(rr.Body.String())
-		if err != nil {
-			t.Fatalf("not base64: %v", err)
-		}
-		var out []string
-		for _, l := range strings.Split(string(dec), "\n") {
-			if strings.TrimSpace(l) != "" {
-				out = append(out, l)
-			}
-		}
-		return out
+	rr := httptest.NewRecorder()
+	in.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sub", nil))
+	if rr.Code != 200 {
+		t.Fatalf("code %d", rr.Code)
 	}
-
-	lines := fetch()
+	dec, err := base64.StdEncoding.DecodeString(rr.Body.String())
+	if err != nil {
+		t.Fatalf("not base64: %v", err)
+	}
+	var lines []string
+	for _, l := range strings.Split(string(dec), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
 	if len(lines) != 3 {
 		t.Fatalf("merged want 3 lines, got %d: %v", len(lines), lines)
 	}
@@ -113,19 +108,5 @@ func TestInternalSubMergesMultipleAndPerServerDisable(t *testing.T) {
 	}
 	if !deOK || len(nlTagged) != 2 {
 		t.Fatalf("want DE + 2 tagged NL; deOK=%v nlTagged=%v", deOK, nlTagged)
-	}
-
-	// Выключаем ОДИН тегированный NL — должен исчезнуть только он.
-	if err := st.SetServerEnabled(nlTagged[0], false); err != nil {
-		t.Fatal(err)
-	}
-	lines2 := fetch()
-	if len(lines2) != 2 {
-		t.Fatalf("after per-server disable want 2 lines, got %d: %v", len(lines2), lines2)
-	}
-	for _, l := range lines2 {
-		if sub.Remark(l) == nlTagged[0] {
-			t.Fatalf("disabled server %q still present", nlTagged[0])
-		}
 	}
 }

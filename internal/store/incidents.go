@@ -174,17 +174,6 @@ func (s *Store) EndMaintenance(id int64) error {
 	return err
 }
 
-// EndMaintenanceByName закрывает все активные окна для группы по имени.
-func (s *Store) EndMaintenanceByName(name string) (int64, error) {
-	res, err := s.exec(`UPDATE maintenance SET to_ts=? WHERE name=? AND (to_ts=0 OR to_ts>?)`,
-		time.Now().Unix(), name, time.Now().Unix())
-	if err != nil {
-		return 0, err
-	}
-	n, _ := res.RowsAffected()
-	return n, nil
-}
-
 // ActiveMaintenance — окна, активные на момент now (from<=now<to, либо to=0).
 func (s *Store) ActiveMaintenance(now int64) ([]Maintenance, error) {
 	rows, err := s.query(

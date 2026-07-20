@@ -136,8 +136,6 @@ func (s *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS incident_updates(
 			id ` + s.d.pk() + `,
 			incident_id BIGINT, ts BIGINT, status TEXT, body TEXT, author BIGINT)`,
-		`CREATE TABLE IF NOT EXISTS servers_meta(
-			name TEXT PRIMARY KEY, enabled BIGINT DEFAULT 1, note TEXT)`,
 		`CREATE TABLE IF NOT EXISTS secrets(
 			k TEXT PRIMARY KEY, nonce ` + s.d.blob() + `, ciphertext ` + s.d.blob() + `)`,
 		`CREATE TABLE IF NOT EXISTS audit(

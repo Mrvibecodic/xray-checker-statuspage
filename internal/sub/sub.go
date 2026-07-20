@@ -1,7 +1,7 @@
-// Package sub фильтрует подписку, которую наш сервис отдаёт xray-checker по /sub:
-// убирает строки серверов, выключенных через бота (servers_meta.enabled=0).
-// Поддерживает base64-обёрнутые подписки и простые списки строк; ремарку берёт
-// из #fragment (url-декодирует). Это «прослойка» из ПЛАН §8.2.
+// Package sub объединяет одну или несколько upstream-подписок в единый формат,
+// который принимает xray-checker: декодирует base64/plaintext-списки share-ссылок
+// и XRAY_JSON (Remnawave под Happ/1.0), склеивает их в один поток и разводит
+// дубли ремарок стабильным тегом. Это «прослойка» из ПЛАН §8.2.
 package sub
 
 import (
@@ -19,7 +19,7 @@ import (
 // tagMark — разделитель тега разведения дублей: когда одна и та же ремарка
 // встречается в нескольких подписках, к каждой добавляется стабильный короткий
 // тег (хеш строки), чтобы серверы стали различимы. Страница тег срезает
-// (StripTag), бот и фильтрация подписки работают по полному имени с тегом.
+// (StripTag), бот работает по полному имени с тегом.
 const tagMark = " ·#"
 
 var tagRe = regexp.MustCompile(` ·#[0-9a-f]{1,8}$`)
@@ -45,40 +45,12 @@ func setRemark(line, name string) string {
 	return line[:i+1] + url.PathEscape(name)
 }
 
-// Filter возвращает подписку без серверов, чьи имена (ремарки) есть в disabled.
-// Кодировка результата совпадает со входной (base64 → base64).
-func Filter(raw []byte, disabled map[string]bool) []byte {
-	text := strings.TrimSpace(string(raw))
-	wasB64, decoded := tryBase64(text)
-	body := text
-	if wasB64 {
-		body = decoded
-	}
-	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
-	keep := make([]string, 0, len(lines))
-	for _, line := range lines {
-		l := strings.TrimSpace(line)
-		if l == "" {
-			continue
-		}
-		name := Remark(l)
-		if name != "" && disabled[name] {
-			continue
-		}
-		keep = append(keep, l)
-	}
-	out := strings.Join(keep, "\n")
-	if wasB64 {
-		return []byte(base64.StdEncoding.EncodeToString([]byte(out)))
-	}
-	return []byte(out)
-}
-
 // Merge объединяет несколько подписок (каждая base64 или plaintext) в одну
-// ленту: декодирует каждую, склеивает строки, убирает дубли и выключенные
-// серверы, и кодирует результат в base64 — единый формат, который xray-checker
-// принимает независимо от формата исходных подписок.
-func Merge(raws [][]byte, disabled map[string]bool) []byte {
+// ленту: декодирует каждую, склеивает строки, убирает дубли строк и разводит
+// повторяющиеся ремарки стабильным тегом, затем кодирует результат в base64 —
+// единый формат, который xray-checker принимает независимо от формата исходных
+// подписок.
+func Merge(raws [][]byte) []byte {
 	// 1) Собрать уникальные строки (по полной строке), сохраняя порядок, и
 	// посчитать, сколько раз встречается каждая ремарка.
 	type item struct{ line, remark string }
@@ -103,17 +75,13 @@ func Merge(raws [][]byte, disabled map[string]bool) []byte {
 			}
 		}
 	}
-	// 2) Развести дубли ремарок стабильным тегом и отфильтровать выключенные
-	// (проверка по эффективному — уже с тегом — имени).
+	// 2) Развести дубли ремарок стабильным тегом.
 	keep := make([]string, 0, len(items))
 	for _, it := range items {
 		name, line := it.remark, it.line
 		if name != "" && remarkCount[name] > 1 {
 			name = name + tagMark + lineTag(it.line)
 			line = setRemark(it.line, name)
-		}
-		if name != "" && disabled[name] {
-			continue
 		}
 		keep = append(keep, line)
 	}
@@ -122,12 +90,11 @@ func Merge(raws [][]byte, disabled map[string]bool) []byte {
 }
 
 // FilterJSON обрабатывает подписку в формате XRAY_JSON (массив конфигов, который
-// Remnawave отдаёт под UA Happ/1.0). Выкидывает конфиги, чья ремарка (remarks)
-// есть в disabled, и склеивает оставшиеся из всех переданных подписок в один
-// JSON-массив. Второе значение — была ли это вообще JSON-подписка; если нет,
-// вызывающий идёт по base64-пути (Merge). В отличие от share-ссылок, здесь
-// сохраняются routing/balancers — без этого балансеры до чекера не доходят.
-func FilterJSON(raws [][]byte, disabled map[string]bool) ([]byte, bool) {
+// Remnawave отдаёт под UA Happ/1.0): склеивает конфиги из всех переданных
+// подписок в один JSON-массив, сохраняя routing/balancers как есть — без этого
+// балансеры до чекера не доходят. Второе значение — была ли это вообще
+// JSON-подписка; если нет, вызывающий идёт по base64-пути (Merge).
+func FilterJSON(raws [][]byte) ([]byte, bool) {
 	var all []json.RawMessage
 	sawJSON := false
 	for _, raw := range raws {
@@ -155,16 +122,7 @@ func FilterJSON(raws [][]byte, disabled map[string]bool) ([]byte, bool) {
 			continue
 		}
 		sawJSON = true
-		for _, c := range arr {
-			var meta struct {
-				Remarks string `json:"remarks"`
-			}
-			_ = json.Unmarshal(c, &meta)
-			if meta.Remarks != "" && disabled[meta.Remarks] {
-				continue
-			}
-			all = append(all, c)
-		}
+		all = append(all, arr...)
 	}
 	if !sawJSON {
 		return nil, false
@@ -207,24 +165,6 @@ func Remark(line string) string {
 		frag = dec
 	}
 	return strings.TrimSpace(frag)
-}
-
-// Names возвращает список имён (ремарок) всех серверов в подписке — для
-// сопоставления с servers_meta.
-func Names(raw []byte) []string {
-	text := strings.TrimSpace(string(raw))
-	if ok, dec := tryBase64(text); ok {
-		text = dec
-	}
-	var out []string
-	seen := map[string]bool{}
-	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
-		if n := Remark(strings.TrimSpace(line)); n != "" && !seen[n] {
-			seen[n] = true
-			out = append(out, n)
-		}
-	}
-	return out
 }
 
 // tryBase64 определяет, является ли вход base64-подпиской (декодируется в текст

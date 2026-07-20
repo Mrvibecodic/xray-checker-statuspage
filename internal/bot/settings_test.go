@@ -41,9 +41,6 @@ func TestCmdSet(t *testing.T) {
 	if st.PublicDomain() != "status.example.com" {
 		t.Fatalf("domain normalize failed: %q", st.PublicDomain())
 	}
-	if out := cmdSettings(st); !strings.Contains(out, "status.example.com") {
-		t.Fatalf("settings view: %s", out)
-	}
 }
 
 func TestCmdNginx(t *testing.T) {
