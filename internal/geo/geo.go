@@ -121,9 +121,10 @@ func ccFromFlag(name string) string {
 	return ""
 }
 
-var prefixRe = regexp.MustCompile(`^[A-Za-zА-Яа-яЁё]{2,3}[\s\-_|.]+(.+)$`)
+var prefixRe = regexp.MustCompile(`^([A-Za-zА-Яа-яЁё]{2,3})[\s\-_|.]+(.+)$`)
 
-// DisplayName убирает флаг-эмодзи и короткий код-префикс (если страна найдена).
+// DisplayName убирает флаг-эмодзи, а короткий префикс — только если он
+// дублирует определённую страну (cc); иначе префикс — часть имени сервера.
 func DisplayName(name, cc string) string {
 	if name == "" {
 		return name
@@ -137,7 +138,10 @@ func DisplayName(name, cc string) string {
 	s = strings.TrimSpace(s)
 	if cc != "" {
 		if m := prefixRe.FindStringSubmatch(s); m != nil {
-			s = strings.TrimSpace(m[1])
+			p := strings.ToLower(m[1])
+			if p == cc || DetectCountry(p) == cc {
+				s = strings.TrimSpace(m[2])
+			}
 		}
 	}
 	if s == "" {

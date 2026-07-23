@@ -28,8 +28,14 @@ func TestDisplayName(t *testing.T) {
 	cases := []struct{ name, cc, want string }{
 		{"🇳🇱 NL-Amsterdam", "nl", "Amsterdam"},
 		{"DE Frankfurt", "de", "Frankfurt"},
+		{"USA New York", "us", "New York"},
 		{"PlainHost", "", "PlainHost"},
 		{"", "ru", ""},
+		// Префикс — часть имени, а не код определённой страны: не срезать.
+		{"🇩🇪 IN (Xray-Checker)", "de", "IN (Xray-Checker)"},
+		{"🇫🇮 NH (Xray-Checker)", "fi", "NH (Xray-Checker)"},
+		// Префикс совпадает со страной флага — дубль, срезаем.
+		{"🇮🇳 IN Mumbai", "in", "Mumbai"},
 	}
 	for _, c := range cases {
 		if got := DisplayName(c.name, c.cc); got != c.want {
