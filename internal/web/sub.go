@@ -2,6 +2,7 @@ package web
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -48,7 +49,10 @@ func (in *Internal) sub(w http.ResponseWriter, r *http.Request) {
 	// UA чекера форвардим апстриму: в json-режиме чекер ходит под "Happ/1.0", и
 	// Remnawave отдаёт XRAY_JSON (с балансерами/роутингом); иначе — обычный
 	// формат (base64 share-ссылки). Пустой UA => дефолт Go => прежнее поведение.
+	// X-Hwid форвардим по той же причине: часть панелей выбирает формат не только
+	// по UA, а чекер в json-режиме шлёт оба заголовка.
 	ua := r.Header.Get("User-Agent")
+	hwid := r.Header.Get("X-Hwid")
 	var raws [][]byte
 	for _, u := range urls {
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u, nil)
@@ -57,6 +61,9 @@ func (in *Internal) sub(w http.ResponseWriter, r *http.Request) {
 		}
 		if ua != "" {
 			req.Header.Set("User-Agent", ua)
+		}
+		if hwid != "" {
+			req.Header.Set("X-Hwid", hwid)
 		}
 		resp, err := in.client.Do(req)
 		if err != nil {
@@ -73,7 +80,11 @@ func (in *Internal) sub(w http.ResponseWriter, r *http.Request) {
 	// XRAY_JSON (Remnawave под Happ): склеиваем конфиги на уровне JSON и отдаём
 	// как есть — иначе балансеры/роутинг терялись бы при построчном merge.
 	// Не-JSON (base64/plaintext share-ссылки) идут прежним путём.
-	if out, ok := sub.FilterJSON(raws); ok {
+	if out, ok, skipped := sub.FilterJSON(raws); ok {
+		if skipped > 0 {
+			slog.Warn("sub: смешанные форматы подписок — не-JSON подписки не попали в JSON-выдачу",
+				"skipped", skipped, "total", len(raws))
+		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write(out)
 		return

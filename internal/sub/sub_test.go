@@ -116,9 +116,12 @@ func TestFilterJSON_keepsBalancer(t *testing.T) {
 	  {"remarks":"Group B","outbounds":[{"tag":"proxy"}]},
 	  {"remarks":"Group C","outbounds":[{"tag":"proxy"}]}
 	]`)
-	out, ok := FilterJSON([][]byte{raw})
+	out, ok, skipped := FilterJSON([][]byte{raw})
 	if !ok {
 		t.Fatal("FilterJSON должен распознать JSON-подписку")
+	}
+	if skipped != 0 {
+		t.Fatalf("нет чужих форматов, а skipped=%d", skipped)
 	}
 	var arr []map[string]any
 	if err := json.Unmarshal(out, &arr); err != nil {
@@ -139,7 +142,25 @@ func TestFilterJSON_keepsBalancer(t *testing.T) {
 func TestFilterJSON_base64NotJSON(t *testing.T) {
 	// base64 share-подписка не должна распознаваться как JSON (идём по Merge-пути).
 	b64 := []byte("dmxlc3M6Ly94QGE6MSNB") // base64 of one share-link with remark "A"
-	if _, ok := FilterJSON([][]byte{b64}); ok {
+	if _, ok, _ := FilterJSON([][]byte{b64}); ok {
 		t.Fatal("base64-подписка не должна обрабатываться как JSON")
+	}
+}
+
+func TestFilterJSON_mixedFormatsReportsSkipped(t *testing.T) {
+	// Смешанные форматы: JSON-подписка выигрывает, но отброшенная base64
+	// должна быть посчитана — вызывающий обязан сообщить о ней в лог.
+	jsonSub := []byte(`[{"remarks":"A","outbounds":[{"tag":"proxy"}]}]`)
+	b64Sub := []byte("dmxlc3M6Ly94QGE6MSNC")
+	out, ok, skipped := FilterJSON([][]byte{jsonSub, b64Sub})
+	if !ok {
+		t.Fatal("JSON-подписка в миксе должна распознаваться")
+	}
+	if skipped != 1 {
+		t.Fatalf("ожидался 1 отброшенный не-JSON источник, got %d", skipped)
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal(out, &arr); err != nil || len(arr) != 1 {
+		t.Fatalf("выдача должна содержать ровно JSON-конфиги: err=%v len=%d", err, len(arr))
 	}
 }

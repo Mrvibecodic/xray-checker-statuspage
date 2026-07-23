@@ -8,6 +8,7 @@ services:
     environment:
       SUBSCRIPTION_URL: "http://localhost:8081/sub"
       PROXY_CHECK_INTERVAL: "300"          # частота РЕАЛЬНЫХ проверок прокси (сек) — меняешь здесь
+      SUBSCRIPTION_JSON_FORMAT: "true"     # балансиры-группы из XRAY_JSON проверяются по узлам; если панель JSON не отдаёт — работает как раньше
 
   statuspage:
     image: ghcr.io/mrvibecodic/xray-checker-statuspage:go-build

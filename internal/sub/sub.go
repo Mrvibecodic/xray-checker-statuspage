@@ -93,10 +93,14 @@ func Merge(raws [][]byte) []byte {
 // Remnawave отдаёт под UA Happ/1.0): склеивает конфиги из всех переданных
 // подписок в один JSON-массив, сохраняя routing/balancers как есть — без этого
 // балансеры до чекера не доходят. Второе значение — была ли это вообще
-// JSON-подписка; если нет, вызывающий идёт по base64-пути (Merge).
-func FilterJSON(raws [][]byte) ([]byte, bool) {
+// JSON-подписка; если нет, вызывающий идёт по base64-пути (Merge). Третье —
+// сколько НЕ-JSON подписок пришлось отбросить при JSON-выдаче (смешанные
+// форматы в один ответ не склеить; вызывающий должен об этом сообщить в лог,
+// а не терять серверы молча).
+func FilterJSON(raws [][]byte) ([]byte, bool, int) {
 	var all []json.RawMessage
 	sawJSON := false
+	skipped := 0
 	for _, raw := range raws {
 		t := bytes.TrimSpace(raw)
 		if len(t) == 0 {
@@ -106,6 +110,7 @@ func FilterJSON(raws [][]byte) ([]byte, bool) {
 		switch t[0] {
 		case '[':
 			if err := json.Unmarshal(t, &arr); err != nil {
+				skipped++
 				continue
 			}
 		case '{':
@@ -119,22 +124,23 @@ func FilterJSON(raws [][]byte) ([]byte, bool) {
 				arr = []json.RawMessage{append([]byte(nil), t...)}
 			}
 		default:
+			skipped++
 			continue
 		}
 		sawJSON = true
 		all = append(all, arr...)
 	}
 	if !sawJSON {
-		return nil, false
+		return nil, false, 0
 	}
 	if all == nil {
 		all = []json.RawMessage{}
 	}
 	out, err := json.Marshal(all)
 	if err != nil {
-		return nil, false
+		return nil, false, 0
 	}
-	return out, true
+	return out, true, skipped
 }
 
 // ParseURLs разбивает пользовательский ввод в список URL подписок. Допускает
