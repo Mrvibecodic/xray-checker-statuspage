@@ -83,7 +83,7 @@ func (tb *Bot) settingsKB() *models.InlineKeyboardMarkup {
 		{ikb("🗓 Сводка: "+sum, "set:sum")},
 		{ikb("🧹 Автоудаление алертов: "+ttl, "set:attl")},
 		{ikb("🔕 Тихие серверы", "set:mute")},
-		{ikb("◀ Ещё", "m:more")},
+		{ikb("◀ Меню", "m:home")},
 	}}
 }
 

@@ -191,7 +191,7 @@ func (tb *Bot) mainMenuText() string {
 // noDataHint — почему данных нет: подписка не задана, или ждём проверку чекера.
 func (tb *Bot) noDataHint() string {
 	if !tb.st.HasSubscriptionURL() && tb.cfg.SubscriptionURL == "" {
-		return "❌ Подписка не задана.\n\nЗадай её сначала:\n• в боте: «⚙️ Ещё» → «🔌 Подписка»\n• или в docker-compose (SUBSCRIPTION_URL у statuspage) и перезапусти контейнер"
+		return "❌ Подписка не задана.\n\nЗадай её сначала:\n• в боте: кнопка «🔌 Подписки» в меню\n• или в docker-compose (SUBSCRIPTION_URL у statuspage) и перезапусти контейнер"
 	}
 	return "⏳ Данных пока нет — ждём первую проверку чекера.\nСразу: <code>docker compose restart xray-checker</code>"
 }

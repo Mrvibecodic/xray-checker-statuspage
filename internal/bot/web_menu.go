@@ -96,7 +96,7 @@ func (tb *Bot) webKB() *models.InlineKeyboardMarkup {
 	rows = append(rows,
 		[]models.InlineKeyboardButton{ikb("🌐 Задать домен", "set:domain")},
 		[]models.InlineKeyboardButton{ikb("🔧 Конфиг nginx (реверс над ботом)", "m:nginx")},
-		[]models.InlineKeyboardButton{ikb("◀ Меню", "m:home")},
+		[]models.InlineKeyboardButton{ikb("◀ Ещё", "m:more")},
 	)
 	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }

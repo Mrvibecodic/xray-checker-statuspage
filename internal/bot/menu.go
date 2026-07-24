@@ -19,23 +19,26 @@ func pairRows(btns []models.InlineKeyboardButton) [][]models.InlineKeyboardButto
 	return rows
 }
 
+// mainMenuKB — то, чем пользуются ежедневно: мониторинг и реагирование
+// (серверы, инциденты, обслуживание) + подписки с диагностикой и настройки
+// уведомлений. Редкое/разовое — в «Ещё».
 func mainMenuKB() *models.InlineKeyboardMarkup {
 	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 		{ikb("🖥 Серверы", "m:servers"), ikb("🚨 Инциденты", "m:incidents")},
-		{ikb("🛠 Обслуживание", "m:maint"), ikb("🚀 Веб-сервер", "m:web")},
-		{ikb("⚙️ Ещё", "m:more")},
+		{ikb("🛠 Обслуживание", "m:maint"), ikb("🔌 Подписки", "m:sub")},
+		{ikb("⚙️ Настройки", "m:settings"), ikb("⋯ Ещё", "m:more")},
 		{ikb("🔄 Обновить статус", "m:refresh")},
 	}}
 }
 
-// moreKB — редко используемые разделы, чтобы не загромождать главную.
+// moreKB — редкие разделы, сгруппированы по смыслу: аналитика и видимость /
+// веб и внешний вид страницы / обслуживание самого сервиса.
 func moreKB() *models.InlineKeyboardMarkup {
 	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 		{ikb("📈 Статистика", "m:stats"), ikb("👁 Видимость", "m:vis")},
-		{ikb("🔌 Подписка", "m:sub"), ikb("⬆️ Обновление", "m:update")},
-		{ikb("🎨 Вид страницы", "m:page"), ikb("⚙️ Настройки", "m:settings")},
-		{ikb("🧹 База / очистка", "m:clean")},
-		{ikb("📜 Журнал", "m:audit")},
+		{ikb("🚀 Веб-сервер", "m:web"), ikb("🎨 Вид страницы", "m:page")},
+		{ikb("🧹 База / очистка", "m:clean"), ikb("📜 Журнал", "m:audit")},
+		{ikb("⬆️ Обновление", "m:update")},
 		{ikb("◀ Меню", "m:home")},
 	}}
 }
@@ -65,7 +68,7 @@ func backKB() *models.InlineKeyboardMarkup {
 func (tb *Bot) sectionText(uid int64, data string) (string, *models.InlineKeyboardMarkup) {
 	switch data {
 	case "m:more":
-		return "<b>⚙️ Ещё</b>\nСтатистика, видимость серверов на странице, подписка чекера, обновление, настройки, очистка базы и журнал.", moreKB()
+		return "<b>⋯ Ещё</b>\nСтатистика и видимость, веб-сервер и вид страницы, очистка базы, журнал и обновление сервиса.", moreKB()
 	case "m:page":
 		return tb.pageText(), tb.pageKB()
 	case "m:clean":

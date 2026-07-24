@@ -64,7 +64,7 @@ func (tb *Bot) subKB() *models.InlineKeyboardMarkup {
 		rows = append(rows, []models.InlineKeyboardButton{ikb("➕ Добавить подписку", "sub:add")})
 	}
 	rows = append(rows, []models.InlineKeyboardButton{ikb("🩺 Диагностика", "sub:diag")})
-	rows = append(rows, []models.InlineKeyboardButton{ikb("◀ Ещё", "m:more")})
+	rows = append(rows, []models.InlineKeyboardButton{ikb("◀ Меню", "m:home")})
 	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
