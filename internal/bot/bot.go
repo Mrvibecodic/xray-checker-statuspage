@@ -372,8 +372,46 @@ func (tb *Bot) HandleEvent(e poller.Event) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	ttl := tb.st.AlertTTLHours()
 	for _, t := range tb.alertTargets {
-		tb.replyTo(ctx, t.chatID, t.threadID, text)
+		tb.sendAlert(ctx, t.chatID, t.threadID, text, ttl)
+	}
+}
+
+// sendAlert шлёт алерт и, если включена автоочистка (ttl часов > 0), запоминает
+// сообщение в БД — планировщик удалит его из чата, когда срок выйдет. Telegram
+// разрешает боту удалять свои сообщения только младше 48 часов, поэтому и
+// настройка ограничена этим потолком.
+func (tb *Bot) sendAlert(ctx context.Context, chatID int64, threadID int, text string, ttlHours int) {
+	p := &bot.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML}
+	if threadID > 0 {
+		p.MessageThreadID = threadID
+	}
+	m, err := tb.b.SendMessage(ctx, p)
+	if err != nil {
+		slog.Error("telegram send", "err", err)
+		return
+	}
+	if ttlHours > 0 && m != nil {
+		_ = tb.st.AddAlertMessage(chatID, m.ID, time.Now().Unix()+int64(ttlHours)*3600)
+	}
+}
+
+// deleteDueAlerts удаляет из чатов алерты, чей срок автоочистки наступил.
+// Запись убирается из БД в любом случае: если Telegram отказал (сообщение
+// старше 48ч или уже удалено руками), повтор не поможет.
+func (tb *Bot) deleteDueAlerts() {
+	due, err := tb.st.DueAlertMessages(time.Now().Unix())
+	if err != nil || len(due) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for _, m := range due {
+		if _, err := tb.b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: m.ChatID, MessageID: m.MsgID}); err != nil {
+			slog.Warn("alert autodelete", "chat", m.ChatID, "msg", m.MsgID, "err", err)
+		}
+		_ = tb.st.RemoveAlertMessage(m.ChatID, m.MsgID)
 	}
 }
 
@@ -394,6 +432,7 @@ func (tb *Bot) RunScheduler(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			tb.deleteDueAlerts()
 			now := time.Now().In(loc)
 			if dueSummary(tb.st.DailySummaryTime(), now, lastSent) {
 				lastSent = now.Format("2006-01-02")

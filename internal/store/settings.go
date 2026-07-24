@@ -8,7 +8,34 @@ const (
 	kPingThreshold = "ping_threshold_ms"
 	kDailySummary  = "daily_summary_time"
 	kPublicDomain  = "public_domain"
+	kAlertTTL      = "alert_ttl_hours"
 )
+
+// maxAlertTTLHours — потолок автоудаления: Telegram разрешает боту удалять
+// свои сообщения только младше 48 часов, дольше хранить срок бессмысленно.
+const maxAlertTTLHours = 48
+
+// AlertTTLHours — через сколько часов удалять алерты из чатов (0 = не удалять).
+func (s *Store) AlertTTLHours() int {
+	n, _ := strconv.Atoi(s.GetSetting(kAlertTTL, "0"))
+	if n < 0 {
+		n = 0
+	}
+	if n > maxAlertTTLHours {
+		n = maxAlertTTLHours
+	}
+	return n
+}
+
+func (s *Store) SetAlertTTLHours(h int) error {
+	if h < 0 {
+		h = 0
+	}
+	if h > maxAlertTTLHours {
+		h = maxAlertTTLHours
+	}
+	return s.SetSetting(kAlertTTL, strconv.Itoa(h))
+}
 
 // AlertOnDown — слать ли алерт при падении/восстановлении сервера (дефолт да).
 func (s *Store) AlertOnDown() bool { return s.GetSetting(kAlertOnDown, "1") == "1" }

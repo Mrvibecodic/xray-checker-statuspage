@@ -74,11 +74,27 @@ func (tb *Bot) settingsKB() *models.InlineKeyboardMarkup {
 	if sum == "" {
 		sum = "выкл"
 	}
+	ttl := "выкл"
+	if h := st.AlertTTLHours(); h > 0 {
+		ttl = strconv.Itoa(h) + " ч"
+	}
 	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
 		{ikb("🔔 Алерт: "+alert, "set:alert"), ikb("📡 Пинг: "+ping, "set:ping")},
 		{ikb("🗓 Сводка: "+sum, "set:sum")},
+		{ikb("🧹 Автоудаление алертов: "+ttl, "set:attl")},
 		{ikb("🔕 Тихие серверы", "set:mute")},
 		{ikb("◀ Ещё", "m:more")},
+	}}
+}
+
+// attlKB — срок автоудаления алертов из чатов. Потолок 48 ч — дольше Telegram
+// не позволяет боту удалять свои сообщения.
+func attlKB() *models.InlineKeyboardMarkup {
+	return &models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{
+		{ikb("Выкл", "set:attl:0"), ikb("6 ч", "set:attl:6")},
+		{ikb("12 ч", "set:attl:12"), ikb("24 ч", "set:attl:24")},
+		{ikb("48 ч", "set:attl:48")},
+		{ikb("◀ Назад", "set:home")},
 	}}
 }
 
@@ -130,6 +146,12 @@ func (tb *Bot) handleSettingCallback(uid int64, msgID int, data string) (string,
 	case len(data) > 9 && data[:9] == "set:ping:":
 		n, _ := strconv.Atoi(data[9:])
 		_ = tb.st.SetPingThreshold(n)
+		return tb.settingsText(), tb.settingsKB()
+	case data == "set:attl":
+		return "🧹 Удалять алерты («упал»/«восстановлен», пинг) из чатов спустя:", attlKB()
+	case strings.HasPrefix(data, "set:attl:"):
+		n, _ := strconv.Atoi(data[len("set:attl:"):])
+		_ = tb.st.SetAlertTTLHours(n)
 		return tb.settingsText(), tb.settingsKB()
 	case data == "set:sum":
 		return "🗓 Время ежедневной сводки (по " + tzShort(tb.cfg) + "):", summaryKB()

@@ -123,6 +123,7 @@ func (s *Store) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_samples ON samples(sid, ts)`,
 		`CREATE TABLE IF NOT EXISTS hidden(name TEXT PRIMARY KEY)`,
 		`CREATE TABLE IF NOT EXISTS muted(name TEXT PRIMARY KEY)`,
+		`CREATE TABLE IF NOT EXISTS alert_msgs(chat_id BIGINT, msg_id BIGINT, del_at BIGINT)`,
 		`CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT)`,
 		`CREATE TABLE IF NOT EXISTS maintenance(
 			id ` + s.d.pk() + `,

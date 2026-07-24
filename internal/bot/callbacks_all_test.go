@@ -59,6 +59,7 @@ func TestAllCallbacks(t *testing.T) {
 
 	for _, d := range []string{"set:home", "set:alert", "set:ping", "set:ping:300", "set:ping:0",
 		"set:sum", "set:sum:09:00", "set:sum:off", "set:domain",
+		"set:attl", "set:attl:24", "set:attl:0",
 		"set:theme", "set:theme:dark",
 		"set:title", "set:subtitle", "set:desc", "set:favicon", "set:favreset"} {
 		txt, kb := tb.handleSettingCallback(1, 10, d)
