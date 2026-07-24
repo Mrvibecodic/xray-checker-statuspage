@@ -26,7 +26,7 @@ jobs:
             sha256sum "dist/statuspage-linux-$arch" | awk '{print $1}' > "dist/statuspage-linux-$arch.sha256"
           done
       - name: Publish rolling release (tag go-build)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: go-build
           name: go-build (rolling)
