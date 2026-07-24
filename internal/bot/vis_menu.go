@@ -10,19 +10,13 @@ func (tb *Bot) visText() string {
 
 func (tb *Bot) visKB(uid int64) *models.InlineKeyboardMarkup {
 	var btns []models.InlineKeyboardButton
-	cur, _ := tb.st.CurrentRows()
 	hidden, _ := tb.st.HiddenSet()
-	seen := map[string]bool{}
-	for _, r := range cur {
-		if seen[r.Name] {
-			continue
-		}
-		seen[r.Name] = true
+	for _, name := range tb.groupNames() {
 		mark := "🟢"
-		if hidden[r.Name] {
+		if hidden[name] {
 			mark = "🙈"
 		}
-		btns = append(btns, ikb(mark+" "+r.Name, "vis:"+nameTok(r.Name)))
+		btns = append(btns, ikb(mark+" "+name, "vis:"+nameTok(name)))
 	}
 	rows := paginateRows(btns, tb.getPage(uid, "vis_pg"), "vis:pg:")
 	rows = append(rows, []models.InlineKeyboardButton{ikb("◀ Ещё", "m:more")})

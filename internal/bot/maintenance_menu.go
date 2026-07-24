@@ -52,16 +52,9 @@ func maintKB(st *store.Store, _ config.Config) *models.InlineKeyboardMarkup {
 }
 
 func (tb *Bot) maintServersKB(uid int64) *models.InlineKeyboardMarkup {
-	st := tb.st
 	var btns []models.InlineKeyboardButton
-	seen := map[string]bool{}
-	cur, _ := st.CurrentRows()
-	for _, r := range cur {
-		if seen[r.Name] {
-			continue
-		}
-		seen[r.Name] = true
-		btns = append(btns, ikb(r.Name, "mnt:srv:"+nameTok(r.Name)))
+	for _, name := range tb.groupNames() {
+		btns = append(btns, ikb(name, "mnt:srv:"+nameTok(name)))
 	}
 	rows := paginateRows(btns, tb.getPage(uid, "mnt_srv_pg"), "mnt:srvpg:")
 	rows = append(rows, []models.InlineKeyboardButton{ikb("◀ Назад", "m:maint")})

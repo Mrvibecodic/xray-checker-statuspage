@@ -119,18 +119,12 @@ func (tb *Bot) incAffText(uid int64) string {
 func (tb *Bot) incAffKB(uid int64) *models.InlineKeyboardMarkup {
 	sel := splitNL(tb.st.GetBotState(uid, "inc_aff"))
 	var btns []models.InlineKeyboardButton
-	seen := map[string]bool{}
-	cur, _ := tb.st.CurrentRows()
-	for _, r := range cur {
-		if seen[r.Name] {
-			continue
-		}
-		seen[r.Name] = true
-		label := r.Name
-		if contains(sel, r.Name) {
+	for _, name := range tb.groupNames() {
+		label := name
+		if contains(sel, name) {
 			label = "✅ " + label
 		}
-		btns = append(btns, ikb(label, "inc:aff:"+nameTok(r.Name)))
+		btns = append(btns, ikb(label, "inc:aff:"+nameTok(name)))
 	}
 	rows := paginateRows(btns, tb.getPage(uid, "aff_pg"), "inc:affpg:")
 	done := "✅ Создать"

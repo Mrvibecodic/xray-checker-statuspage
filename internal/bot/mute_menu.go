@@ -11,19 +11,13 @@ func (tb *Bot) muteText() string {
 
 func (tb *Bot) muteKB(uid int64) *models.InlineKeyboardMarkup {
 	var btns []models.InlineKeyboardButton
-	cur, _ := tb.st.CurrentRows()
 	muted, _ := tb.st.MutedSet()
-	seen := map[string]bool{}
-	for _, r := range cur {
-		if seen[r.Name] {
-			continue
-		}
-		seen[r.Name] = true
+	for _, name := range tb.groupNames() {
 		mark := "🔔"
-		if muted[r.Name] {
+		if muted[name] {
 			mark = "🔕"
 		}
-		btns = append(btns, ikb(mark+" "+r.Name, "mute:"+nameTok(r.Name)))
+		btns = append(btns, ikb(mark+" "+name, "mute:"+nameTok(name)))
 	}
 	rows := paginateRows(btns, tb.getPage(uid, "mute_pg"), "mute:pg:")
 	rows = append(rows, []models.InlineKeyboardButton{ikb("◀ Настройки", "set:home")})
