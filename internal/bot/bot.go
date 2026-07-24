@@ -292,6 +292,10 @@ func (tb *Bot) onCallback(ctx context.Context, update *models.Update) {
 		tb.startRefresh(ctx, chatID, msgID)
 		tb.answer(ctx, cq.ID)
 		return
+	case "sub:diag":
+		tb.startSubDiag(ctx, chatID, msgID)
+		tb.answer(ctx, cq.ID)
+		return
 	}
 
 	var text string
