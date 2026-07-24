@@ -163,7 +163,11 @@ func (s *Store) PollWrite(proxies []checker.Proxy, p PollWriteParams) (cleaned [
 	return cleaned, nil
 }
 
-// DeleteServer удаляет всю группу (одноимённые sid). Возврат — число удалённых sid.
+// DeleteServer удаляет всю группу: одноимённые sid, а для балансировочной
+// группы — ещё и все sid с тем же grp. Узлы балансира носят РАЗНЫЕ имена
+// («… | proxy», «… | proxy-2»), их объединяет только grp; без этого кнопка
+// удаления сносила один узел, и группа «воскресала» в списке отсутствующих.
+// Возврат — число удалённых sid.
 func (s *Store) DeleteServer(sid string) (int, error) {
 	if sid == "" {
 		return 0, nil
@@ -172,12 +176,16 @@ func (s *Store) DeleteServer(sid string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var name string
-	if err := tx.QueryRow(`SELECT name FROM current WHERE sid=?`, sid).Scan(&name); err != nil {
+	var name, grp string
+	if err := tx.QueryRow(`SELECT name, COALESCE(grp,'') FROM current WHERE sid=?`, sid).Scan(&name, &grp); err != nil {
 		_ = tx.Rollback()
 		return 0, nil
 	}
-	rows, err := tx.Query(`SELECT sid FROM current WHERE name=?`, name)
+	q, args := `SELECT sid FROM current WHERE name=?`, []any{name}
+	if grp != "" {
+		q, args = `SELECT sid FROM current WHERE name=? OR grp=?`, []any{name, grp}
+	}
+	rows, err := tx.Query(q, args...)
 	if err != nil {
 		_ = tx.Rollback()
 		return 0, err
@@ -195,6 +203,10 @@ func (s *Store) DeleteServer(sid string) (int, error) {
 		_, _ = tx.Exec(`DELETE FROM samples WHERE sid=?`, s)
 	}
 	_, _ = tx.Exec(`DELETE FROM hidden WHERE name=?`, name)
+	if grp != "" {
+		// скрытие групп ключуется по имени группы — подчистим и его
+		_, _ = tx.Exec(`DELETE FROM hidden WHERE name=?`, grp)
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
