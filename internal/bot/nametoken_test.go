@@ -15,8 +15,12 @@ import (
 
 func TestNameTokStableAndFits(t *testing.T) {
 	n := "🇷🇺 Россия · Москва — основной канал 500 Мбит"
-	if nameTok(n) != nameTok(n) {
+	first := nameTok(n)
+	if nameTok(n) != first {
 		t.Fatal("nameTok не стабилен")
+	}
+	if nameTok(n+"x") == first {
+		t.Fatal("разные имена дали одинаковый токен")
 	}
 	if got := len(nameTok(n)); got != 16 {
 		t.Fatalf("токен = %d символов, ожидалось 16", got)

@@ -299,7 +299,7 @@ func (tb *Bot) onCallback(ctx context.Context, update *models.Update) {
 	}
 
 	var text string
-	kb := backKB()
+	var kb *models.InlineKeyboardMarkup
 	switch {
 	case cq.Data == "m:upcheck":
 		text = tb.checkUpdateText(ctx)

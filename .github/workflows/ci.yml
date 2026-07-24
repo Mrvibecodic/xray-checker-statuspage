@@ -12,9 +12,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+      - name: gofmt (форматирование обязано быть каноничным)
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "не отформатировано gofmt:"; echo "$out"; exit 1; fi
       - run: go vet ./...
-      - run: go test ./...
+      - name: staticcheck (закреплённая версия — воспроизводимо)
+        run: go run honnef.co/go/tools/cmd/staticcheck@2025.1 ./...
+      - name: tests (с детектором гонок)
+        run: go test -race ./...
       - run: CGO_ENABLED=0 go build ./...
+      - name: govulncheck (известные уязвимости зависимостей; информационно, сборку не валит)
+        continue-on-error: true
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   docker:
     needs: test
