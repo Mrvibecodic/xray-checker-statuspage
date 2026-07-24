@@ -56,7 +56,7 @@ jobs:
           curl -fsS http://localhost:8080/api/summary -o /dev/null && echo "image OK"
           docker rm -f sp
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
