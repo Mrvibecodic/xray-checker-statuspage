@@ -1,0 +1,26 @@
+version: 2
+updates:
+  # Go-зависимости бота (go.mod): раз в неделю PR с обновлением и ченджлогом.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+
+  # Экшены CI (actions/checkout, setup-go и т.д.)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+
+  # Базовые образы Dockerfile (golang, distroless)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "docker"
