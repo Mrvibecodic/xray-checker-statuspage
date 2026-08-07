@@ -215,6 +215,23 @@ docker compose pull && docker compose up -d
 
 ## Сборка из исходников
 
+Для запуска всей связки через Docker Compose из текущего checkout:
+
+```bash
+cp docker-compose.example.yml docker-compose.yml
+# Заполни BOT_TOKEN/BOT_ADMIN_IDS и остальные нужные параметры в docker-compose.yml.
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+Файл `docker-compose.build.yml` переопределяет только образ `statuspage`: Compose
+собирает его из локального `Dockerfile`, присваивает тег
+`xray-checker-statuspage:${VERSION:-local}` и оставляет конфигурацию
+`xray-checker`, host-сеть и том данных из основного compose-файла без изменений.
+При необходимости версию можно передать перед командой, например
+`VERSION=dev docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
+
+Сборка одного бинарника без Docker:
+
 ```bash
 CGO_ENABLED=0 go build -trimpath -o statuspage ./cmd/statuspage
 ```
