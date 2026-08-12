@@ -1,12 +1,12 @@
 package store
 
 import (
-	"path/filepath"
 	"testing"
+	"xray-status/internal/storetest"
 )
 
 func TestSubscriptionURLSecret(t *testing.T) {
-	st, err := Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestSubscriptionURLSecret(t *testing.T) {
 }
 
 func TestMultipleSubscriptions(t *testing.T) {
-	st, err := Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

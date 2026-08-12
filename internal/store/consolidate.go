@@ -80,9 +80,9 @@ func (s *Store) mergeSid(from, to string) (err error) {
 	if _, err = tx.Exec(`INSERT INTO daily(day,sid,up,down,lat_sum,lat_cnt,down_conf)
 		SELECT day,?,up,down,lat_sum,lat_cnt,down_conf FROM daily WHERE sid=?
 		ON CONFLICT(day,sid) DO UPDATE SET
-		  up=up+excluded.up, down=down+excluded.down,
-		  lat_sum=lat_sum+excluded.lat_sum, lat_cnt=lat_cnt+excluded.lat_cnt,
-		  down_conf=down_conf+excluded.down_conf`, to, from); err != nil {
+		  up=daily.up+excluded.up, down=daily.down+excluded.down,
+		  lat_sum=daily.lat_sum+excluded.lat_sum, lat_cnt=daily.lat_cnt+excluded.lat_cnt,
+		  down_conf=daily.down_conf+excluded.down_conf`, to, from); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(`DELETE FROM daily WHERE sid=?`, from); err != nil {

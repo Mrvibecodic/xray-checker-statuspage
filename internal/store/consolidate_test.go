@@ -1,6 +1,9 @@
 package store
 
-import "testing"
+import (
+	"testing"
+	"xray-status/internal/storetest"
+)
 
 func insCur(t *testing.T, s *Store, sid, name string, ts int64) {
 	t.Helper()
@@ -32,7 +35,7 @@ func count(t *testing.T, s *Store, q string, a ...any) int {
 }
 
 func TestConsolidateByName(t *testing.T) {
-	s, err := Open("sqlite", t.TempDir()+"/c.db")
+	s, err := Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

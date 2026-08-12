@@ -83,9 +83,9 @@ func (s *Store) PollWrite(proxies []checker.Proxy, p PollWriteParams) (cleaned [
 		if _, err = tx.Exec(`INSERT INTO daily(day,sid,up,down,lat_sum,lat_cnt,down_conf)
 			VALUES(?,?,?,?,?,?,?)
 			ON CONFLICT(day,sid) DO UPDATE SET
-			  up=up+excluded.up, down=down+excluded.down,
-			  lat_sum=lat_sum+excluded.lat_sum, lat_cnt=lat_cnt+excluded.lat_cnt,
-			  down_conf=down_conf+excluded.down_conf`,
+			  up=daily.up+excluded.up, down=daily.down+excluded.down,
+			  lat_sum=daily.lat_sum+excluded.lat_sum, lat_cnt=daily.lat_cnt+excluded.lat_cnt,
+			  down_conf=daily.down_conf+excluded.down_conf`,
 			p.Today, sid, up, down, latSum, latCnt, downConf); err != nil {
 			return nil, err
 		}

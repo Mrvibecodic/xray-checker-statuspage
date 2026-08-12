@@ -1,14 +1,14 @@
 package store
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
+	"xray-status/internal/storetest"
 )
 
 func openTmp(t *testing.T) *Store {
 	t.Helper()
-	st, err := Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

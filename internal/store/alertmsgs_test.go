@@ -1,12 +1,12 @@
 package store
 
 import (
-	"path/filepath"
 	"testing"
+	"xray-status/internal/storetest"
 )
 
 func TestAlertMessagesLifecycle(t *testing.T) {
-	st, err := Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestAlertMessagesLifecycle(t *testing.T) {
 }
 
 func TestAlertTTLHoursClamp(t *testing.T) {
-	st, err := Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
