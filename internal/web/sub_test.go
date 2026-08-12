@@ -5,12 +5,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"xray-status/internal/config"
 	"xray-status/internal/store"
+	"xray-status/internal/storetest"
 	"xray-status/internal/sub"
 )
 
@@ -20,7 +20,7 @@ func TestInternalSubServes(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	st, err := store.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestInternalSubServes(t *testing.T) {
 	}
 
 	// без подписки — 404
-	st2, _ := store.Open("sqlite", filepath.Join(t.TempDir(), "t2.db"))
+	st2, _ := store.Open(storetest.DSN(t))
 	defer st2.Close()
 	rr2 := httptest.NewRecorder()
 	NewInternal(config.Config{}, st2).Handler().ServeHTTP(rr2, httptest.NewRequest(http.MethodGet, "/sub", nil))
@@ -63,7 +63,7 @@ func TestInternalSubMergesMultiple(t *testing.T) {
 	}))
 	defer upB.Close()
 
-	st, err := store.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

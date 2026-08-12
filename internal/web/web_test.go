@@ -3,7 +3,6 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,10 +10,11 @@ import (
 	"xray-status/internal/checker"
 	"xray-status/internal/config"
 	"xray-status/internal/store"
+	"xray-status/internal/storetest"
 )
 
 func TestServeSummaryAndPage(t *testing.T) {
-	st, err := store.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestServeSummaryAndPage(t *testing.T) {
 // TestPageRandomizedPerLoad — анти-фингерпринт: каждая загрузка отдаёт разный
 // HTML (свежий префикс классов + шум), но JSON-доступы и критичные CSS не ломаются.
 func TestPageRandomizedPerLoad(t *testing.T) {
-	st, err := store.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestPageRandomizedPerLoad(t *testing.T) {
 }
 
 func TestMinimalThemeServed(t *testing.T) {
-	st, err := store.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
