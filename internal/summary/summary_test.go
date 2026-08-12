@@ -1,18 +1,17 @@
 package summary
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
 	"xray-status/internal/checker"
 	"xray-status/internal/config"
 	"xray-status/internal/store"
+	"xray-status/internal/storetest"
 )
 
 func TestBuildSummaryGroupingAndUptime(t *testing.T) {
-	dir := t.TempDir()
-	st, err := store.Open("sqlite", filepath.Join(dir, "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,8 +86,7 @@ func TestBuildSummaryGroupingAndUptime(t *testing.T) {
 }
 
 func TestSummaryMaintenanceAndIncidents(t *testing.T) {
-	dir := t.TempDir()
-	st, err := store.Open("sqlite", filepath.Join(dir, "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
