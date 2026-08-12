@@ -1,20 +1,19 @@
 package bot
 
 import (
-	"path/filepath"
 	"testing"
 
 	"xray-status/internal/checker"
 	"xray-status/internal/config"
 	"xray-status/internal/store"
+	"xray-status/internal/storetest"
 )
 
 // TestAllCallbacks прогоняет КАЖДЫЙ callback-обработчик бота с засеянными
 // данными и проверяет, что он не паникует и возвращает непустой текст +
 // клавиатуру. Страховка против «мёртвых кнопок».
 func TestAllCallbacks(t *testing.T) {
-	dir := t.TempDir()
-	st, err := store.Open("sqlite", filepath.Join(dir, "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

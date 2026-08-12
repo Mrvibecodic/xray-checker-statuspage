@@ -1,16 +1,16 @@
 package bot
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"xray-status/internal/config"
 	"xray-status/internal/store"
+	"xray-status/internal/storetest"
 )
 
 func TestCmdSet(t *testing.T) {
-	st, err := store.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestCmdSet(t *testing.T) {
 }
 
 func TestCmdNginx(t *testing.T) {
-	st, _ := store.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, _ := store.Open(storetest.DSN(t))
 	defer st.Close()
 	_ = st.SetPublicDomain("status.example.com")
 	out := cmdNginx(st, config.Config{Port: "8080"})

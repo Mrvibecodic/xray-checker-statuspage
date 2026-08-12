@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"xray-status/internal/config"
 	"xray-status/internal/poller"
 	"xray-status/internal/store"
+	"xray-status/internal/storetest"
 )
 
 func TestFlag(t *testing.T) {
@@ -38,8 +38,7 @@ func TestNewDisabledWithoutToken(t *testing.T) {
 }
 
 func TestStatusText(t *testing.T) {
-	dir := t.TempDir()
-	st, err := store.Open("sqlite", filepath.Join(dir, "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

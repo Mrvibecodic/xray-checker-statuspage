@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +9,7 @@ import (
 	"xray-status/internal/checker"
 	"xray-status/internal/config"
 	"xray-status/internal/store"
+	"xray-status/internal/storetest"
 )
 
 // Меню видимости/мьюта/обслуживания/инцидентов должны показывать балансир-группу
@@ -17,7 +17,7 @@ import (
 // узлами «… | proxy», «… | proxy-2»; действие применяется к группе целиком.
 func newGroupBot(t *testing.T) *Bot {
 	t.Helper()
-	st, err := store.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

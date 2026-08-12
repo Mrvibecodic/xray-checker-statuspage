@@ -1,19 +1,19 @@
 package bot
 
 import (
-	"path/filepath"
 	"strconv"
 	"testing"
 
 	"xray-status/internal/config"
 	"xray-status/internal/store"
+	"xray-status/internal/storetest"
 )
 
 // TestIncSetStatusValidation — callback inc:setst принимает только канонический
 // статус; мусорный статус не пишет запись в ленту, валидный — пишет и меняет
 // статус инцидента.
 func TestIncSetStatusValidation(t *testing.T) {
-	st, err := store.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

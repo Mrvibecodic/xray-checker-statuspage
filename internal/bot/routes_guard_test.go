@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +9,7 @@ import (
 	"xray-status/internal/checker"
 	"xray-status/internal/config"
 	"xray-status/internal/store"
+	"xray-status/internal/storetest"
 )
 
 // TestEveryButtonIsRouted — страховка от «мёртвых кнопок»: каждый callback,
@@ -17,7 +17,7 @@ import (
 // маршрут onCallback (точное действие, известный префикс обработчика или
 // известная секция m:*). Появилась новая кнопка без маршрута — тест упадёт.
 func TestEveryButtonIsRouted(t *testing.T) {
-	st, err := store.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}

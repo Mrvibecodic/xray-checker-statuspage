@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"xray-status/internal/checker"
 	"xray-status/internal/config"
 	"xray-status/internal/store"
+	"xray-status/internal/storetest"
 )
 
 func TestNameTokStableAndFits(t *testing.T) {
@@ -36,7 +36,7 @@ func TestNameTokStableAndFits(t *testing.T) {
 // (старый код молча дропал кнопку по такому серверу).
 func longNameBot(t *testing.T) (*Bot, string) {
 	t.Helper()
-	st, err := store.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(storetest.DSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
