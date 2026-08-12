@@ -32,3 +32,10 @@ func TestTLSDefaults(t *testing.T) {
 		t.Fatalf("tls defaults not empty: %q %q %q", c.TLSMode, c.CertFile, c.KeyFile)
 	}
 }
+
+func TestTelegramProxy(t *testing.T) {
+	t.Setenv("TELEGRAM_PROXY", "socks5://user:pass@127.0.0.1:1080")
+	if got := Load().TelegramProxy; got != "socks5://user:pass@127.0.0.1:1080" {
+		t.Fatalf("unexpected TelegramProxy: %q", got)
+	}
+}

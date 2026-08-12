@@ -43,6 +43,7 @@ type Config struct {
 	// Bootstrap для будущих фаз (бот/контроль). Парсим заранее, чтобы
 	// docker-compose уже был стабильным; в M0/M1 не используются.
 	BotToken      string
+	TelegramProxy string
 	BotAdminIDs   []int64
 	NotifyTargets []NotifyTarget
 	SecretKey     string
@@ -163,6 +164,7 @@ func Load() Config {
 		GlobalOutageRatio: atof("GLOBAL_OUTAGE_RATIO", 1.0),
 
 		BotToken:      getenv("BOT_TOKEN", ""),
+		TelegramProxy: getenv("TELEGRAM_PROXY", ""),
 		BotAdminIDs:   splitInt64("BOT_ADMIN_IDS"),
 		NotifyTargets: parseNotifyTargets("NOTIFY_CHAT_IDS"),
 		SecretKey:     getenv("SECRET_KEY", ""),

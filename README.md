@@ -36,6 +36,7 @@ services:
     environment:
       # --- обязательное ---
       BOT_TOKEN: "ВПИШИ_ТОКЕН_БОТА"        # от @BotFather; "" = только страница, без бота
+      # TELEGRAM_PROXY: "socks5://user:password@127.0.0.1:1080" # (необяз.) SOCKS5 только для Telegram Bot API
       BOT_ADMIN_IDS: "ВПИШИ_СВОЙ_CHAT_ID"  # твой id от @userinfobot; несколько — через запятую
       # NOTIFY_CHAT_IDS: "-1001234567890"  # (необяз.) чаты/группы/каналы; топик форума — через двоеточие: -1001234567890:42 (прав на бота не дают)
       # --- базовое ---
@@ -73,6 +74,12 @@ volumes:
 алерты и ежедневную сводку помимо админов (управлять ботом они не могут). Для топика
 форума добавь его id через двоеточие: `-1001234567890:42`.
 Подписку и домен задаёшь в боте, в env их писать не нужно.
+
+Если Telegram недоступен напрямую, укажи `TELEGRAM_PROXY` в формате
+`socks5://host:port` или `socks5://user:password@host:port` и пересоздай контейнер
+`statuspage`. Прокси применяется только к Telegram Bot API; checker, подписки и
+загрузка обновлений продолжают работать напрямую. Спецсимволы в логине и пароле
+нужно URL-кодировать.
 
 > Если xray-checker уже поднят отдельно — убери его блок, а у `statuspage` укажи
 > `CHECKER_URL` на существующий чекер.
@@ -185,6 +192,7 @@ TLS — обычным `certbot --nginx -d status.example.com`.
 | Переменная | По умолчанию | Назначение |
 | --- | --- | --- |
 | `BOT_TOKEN` | — | Токен бота от @BotFather (пусто — только страница) |
+| `TELEGRAM_PROXY` | — | SOCKS5-прокси Telegram: `socks5://[user:password@]host:port` |
 | `BOT_ADMIN_IDS` | — | Chat id админов через запятую |
 | `NOTIFY_CHAT_IDS` | — | Чаты/группы/каналы для алертов; топик форума — `chatID:threadID` (прав на управление не дают) |
 | `CHECKER_URL` | `http://xray-checker:2112` | Адрес xray-checker (в host-сети — `http://localhost:2112`) |
@@ -206,6 +214,23 @@ docker compose pull && docker compose up -d
 нужды его не удаляй, иначе сохранённые секреты перестанут расшифровываться.
 
 ## Сборка из исходников
+
+Для запуска всей связки через Docker Compose из текущего checkout:
+
+```bash
+cp docker-compose.example.yml docker-compose.yml
+# Заполни BOT_TOKEN/BOT_ADMIN_IDS и остальные нужные параметры в docker-compose.yml.
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+Файл `docker-compose.build.yml` переопределяет только образ `statuspage`: Compose
+собирает его из локального `Dockerfile`, присваивает тег
+`xray-checker-statuspage:${VERSION:-local}` и оставляет конфигурацию
+`xray-checker`, host-сеть и том данных из основного compose-файла без изменений.
+При необходимости версию можно передать перед командой, например
+`VERSION=dev docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
+
+Сборка одного бинарника без Docker:
 
 ```bash
 CGO_ENABLED=0 go build -trimpath -o statuspage ./cmd/statuspage

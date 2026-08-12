@@ -18,6 +18,7 @@ services:
     environment:
       # --- обязательное ---
       BOT_TOKEN: ""                        # от @BotFather; "" = только страница, без бота
+      # TELEGRAM_PROXY: "socks5://user:password@127.0.0.1:1080" # (необяз.) SOCKS5 только для Telegram Bot API
       BOT_ADMIN_IDS: ""                    # твой id от @userinfobot; несколько — через запятую
       NOTIFY_CHAT_IDS: ""                  # чаты/группы/каналы для алертов: -1001234567890 или с топиком форума -1001234567890:42; неск. через запятую. Прав на бота не дают
       # --- базовое ---

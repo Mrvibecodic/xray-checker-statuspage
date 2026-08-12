@@ -95,7 +95,15 @@ func New(cfg config.Config, st *store.Store) (*Bot, error) {
 	}
 	tb := &Bot{st: st, cfg: cfg, admins: admins, alertTargets: alertTargets, lastDown: map[string]bool{},
 		upd: updater.New(cfg.UpdateURL, cfg.UpdateSHA256URL)}
-	b, err := bot.New(cfg.BotToken, bot.WithDefaultHandler(tb.onUpdate))
+	options := []bot.Option{bot.WithDefaultHandler(tb.onUpdate)}
+	if cfg.TelegramProxy != "" {
+		client, err := newTelegramHTTPClient(cfg.TelegramProxy)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, bot.WithHTTPClient(telegramPollTimeout, client))
+	}
+	b, err := bot.New(cfg.BotToken, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +116,7 @@ func (tb *Bot) Run(ctx context.Context) {
 	if tb == nil || tb.b == nil {
 		return
 	}
-	slog.Info("telegram bot started", "admins", len(tb.admins))
+	slog.Info("telegram bot started", "admins", len(tb.admins), "socks5_proxy", tb.cfg.TelegramProxy != "")
 	if len(tb.admins) == 0 {
 		slog.Warn("BOT_ADMIN_IDS пуст — бот не примет ни одной команды; впиши свой chat_id (@userinfobot)")
 	}

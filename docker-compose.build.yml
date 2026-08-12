@@ -1,0 +1,10 @@
+# Overlay для локальной сборки statuspage из текущего checkout.
+# Использование: docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  statuspage:
+    image: xray-checker-statuspage:${VERSION:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-local}
