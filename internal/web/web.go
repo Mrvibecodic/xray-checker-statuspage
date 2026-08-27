@@ -122,12 +122,12 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	subtitle := s.st.GetSetting("subtitle", s.cfg.Subtitle)
 	desc := s.st.GetSetting("description", s.cfg.Description)
 	// фавикон: и как /favicon.ico, и как логотип слева от названия
-	favTag := `<link rel="icon" href="/favicon.ico">`
+	favTag := `<link rel="icon" href="favicon.ico">`
 	logoHTML := string(s.logo)
 	if _, data, ok := s.st.GetAsset("favicon"); ok {
 		v := strconv.Itoa(len(data))
-		favTag = `<link rel="icon" href="/favicon.ico?v=` + v + `">`
-		logoHTML = `<img src="/favicon.ico?v=` + v + `" alt="">`
+		favTag = `<link rel="icon" href="favicon.ico?v=` + v + `">`
+		logoHTML = `<img src="favicon.ico?v=` + v + `" alt="">`
 	}
 
 	// «Тема 2.0» (v2) — отдельный макет из другого шаблона; light/dark — базовый.

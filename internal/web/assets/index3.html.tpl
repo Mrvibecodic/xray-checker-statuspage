@@ -276,7 +276,7 @@ function buildList(data){
     var item=document.createElement("div");item.className="item"+(s.maintenance?" maint":"");item._sid=s.sid;
     item.style.animationDelay=Math.min(idx*0.04,0.5)+"s";
     var row=document.createElement("div");row.className="row";
-    var flag=s.cc?'<img class="flag" src="/flags/'+s.cc+'.svg" alt="" loading="lazy">':'<img class="flag" src="/flags/xx.svg" alt="" loading="lazy">';
+    var flag=s.cc?'<img class="flag" src="flags/'+s.cc+'.svg" alt="" loading="lazy">':'<img class="flag" src="flags/xx.svg" alt="" loading="lazy">';
     var label=document.createElement("div");label.className="label";
     label.innerHTML=flag+'<div class="nm"><div class="name"><span class="sdot"></span><span>'+escapeHtml(s.name)+'</span></div>'+(s.maintenance?'<div class="mnt-line">\uD83D\uDEE0 '+maintLabel(s)+'</div>':'')+'</div>';
     label._s=s;
@@ -330,7 +330,7 @@ function renderIncidents(data){
     if(i.affected&&i.affected.length){
       var ap=i.affected.map(function(a){
         if(typeof a==="string"){return escapeHtml(a);}
-        var f=a.cc?'<img class="flag" src="/flags/'+a.cc+'.svg" alt="" loading="lazy">':'<img class="flag" src="/flags/xx.svg" alt="" loading="lazy">';
+        var f=a.cc?'<img class="flag" src="flags/'+a.cc+'.svg" alt="" loading="lazy">':'<img class="flag" src="flags/xx.svg" alt="" loading="lazy">';
         return f+escapeHtml(a.name||"");
       });
       aff='<div class="inc-aff">🎯 затронуты: '+ap.join(", ")+'</div>';
