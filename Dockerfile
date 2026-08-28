@@ -1,5 +1,5 @@
 # --- build: статический бинарь без CGO ---
-FROM golang:1.26-alpine AS build
+FROM golang:1.27-alpine AS build
 ARG VERSION=go-build
 WORKDIR /src
 COPY go.mod go.sum ./
