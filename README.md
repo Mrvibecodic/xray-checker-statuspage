@@ -1,5 +1,8 @@
 # Кастомный статус-пейдж для xray-checker
 
+[![Telegram — группа](https://img.shields.io/badge/Telegram-%D0%93%D1%80%D1%83%D0%BF%D0%BF%D0%B0-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+2lmP1yhxpCE3MDcy)
+[![Telegram — чат](https://img.shields.io/badge/Telegram-%D0%A7%D0%B0%D1%82%20%D0%B8%20%D0%BF%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%BA%D0%B0-229ED9?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+8BJQXYXYLqM4YWYy)
+
 `xray-checker-statuspage` — современная страница статуса VPN/прокси-серверов поверх
 [xray-checker](https://github.com/kutovoys/xray-checker).
 
@@ -15,7 +18,7 @@
 Активное окно 12 часов с прокруткой, «сейчас» по центру. Тёмная/светлая тема, шрифт Inter с
 кириллицей (локально), своё лого и favicon.
 
-Чат и поддержка: https://t.me/+O5jAhwcYdYhlY2Yy
+Группа: https://t.me/+2lmP1yhxpCE3MDcy · Чат и поддержка: https://t.me/+8BJQXYXYLqM4YWYy
 
 ![Превью интерфейса](assets/preview.png)
 
