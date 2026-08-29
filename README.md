@@ -1,5 +1,8 @@
 # xray-status (Go) — ветка `go-build`
 
+[![Telegram — группа](https://img.shields.io/badge/Telegram-%D0%93%D1%80%D1%83%D0%BF%D0%BF%D0%B0-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+2lmP1yhxpCE3MDcy)
+[![Telegram — чат](https://img.shields.io/badge/Telegram-%D0%A7%D0%B0%D1%82%20%D0%B8%20%D0%BF%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%BA%D0%B0-229ED9?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+8BJQXYXYLqM4YWYy)
+
 ![xray-checker-statuspage](go-statuspage.jpg)
 
 Go-порт статуспейджа поверх [xray-checker](https://github.com/kutovoys/xray-checker):
