@@ -38,7 +38,7 @@ func moreKB() *models.InlineKeyboardMarkup {
 		{ikb("📈 Статистика", "m:stats"), ikb("👁 Видимость", "m:vis")},
 		{ikb("🚀 Веб-сервер", "m:web"), ikb("🎨 Вид страницы", "m:page")},
 		{ikb("🧹 База / очистка", "m:clean"), ikb("📜 Журнал", "m:audit")},
-		{ikb("⬆️ Обновление", "m:update")},
+		{ikb("⬆️ Обновление", "m:update"), ikb("✏️ Имена серверов", "m:ren")},
 		{ikb("◀ Меню", "m:home")},
 	}}
 }
@@ -68,7 +68,7 @@ func backKB() *models.InlineKeyboardMarkup {
 func (tb *Bot) sectionText(uid int64, data string) (string, *models.InlineKeyboardMarkup) {
 	switch data {
 	case "m:more":
-		return "<b>⋯ Ещё</b>\nСтатистика и видимость, веб-сервер и вид страницы, очистка базы, журнал и обновление сервиса.", moreKB()
+		return "<b>⋯ Ещё</b>\nСтатистика и видимость, веб-сервер и вид страницы, имена серверов, очистка базы, журнал и обновление сервиса.", moreKB()
 	case "m:page":
 		return tb.pageText(), tb.pageKB()
 	case "m:clean":
@@ -90,6 +90,9 @@ func (tb *Bot) sectionText(uid int64, data string) (string, *models.InlineKeyboa
 	case "m:vis":
 		tb.setPage(uid, "vis_pg", 0)
 		return tb.visText(), tb.visKB(uid)
+	case "m:ren":
+		tb.setPage(uid, "ren_pg", 0)
+		return tb.renText(), tb.renKB(uid)
 	case "m:sub":
 		return tb.subText(), tb.subKB()
 	case "m:settings":

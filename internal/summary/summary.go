@@ -67,6 +67,10 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 	if err != nil {
 		return nil, err
 	}
+	aliases, err := st.Aliases()
+	if err != nil {
+		return nil, err
+	}
 	lastPollTS := st.LastPollTS()
 	maint, err := st.MaintenanceNames(time.Now().Unix())
 	if err != nil {
@@ -234,11 +238,10 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 
 		// Имя для показа — без тега разведения дублей (тег нужен только для
 		// поштучного управления из бота и фильтрации подписки).
-		base := sub.StripTag(g.name)
-		cc := geo.DetectCountry(base)
+		name, cc := PageName(g.name, aliases)
 		entry := map[string]any{
 			"sid":           canon.sid,
-			"name":          geo.DisplayName(base, cc),
+			"name":          name,
 			"cc":            cc,
 			"online":        grpOnline,
 			"latencyMs":     repLat,
@@ -290,9 +293,8 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 		// SVG на странице, как в основном списке — без «DE»-букв на Windows).
 		affList := make([]any, 0, len(in.Affected))
 		for _, an := range in.Affected {
-			ab := sub.StripTag(an)
-			acc := geo.DetectCountry(ab)
-			affList = append(affList, map[string]any{"name": geo.DisplayName(ab, acc), "cc": acc})
+			an, acc := PageName(an, aliases)
+			affList = append(affList, map[string]any{"name": an, "cc": acc})
 		}
 		ups, _ := st.IncidentUpdates(in.ID)
 		upArr := make([]any, 0, len(ups))
@@ -325,6 +327,21 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 			"maintenance": maintCount,
 		},
 	}, nil
+}
+
+// PageName — имя и страна сервера для страницы. Имя, заданное в боте, идёт
+// как есть; флаг — по нему, а если в нём страны нет, то по исходному имени.
+// Без алиаса — исходное имя без тега дублей, флаг-эмодзи и префикса страны.
+func PageName(raw string, aliases map[string]string) (string, string) {
+	base := sub.StripTag(raw)
+	cc := geo.DetectCountry(base)
+	if a := aliases[raw]; a != "" {
+		if acc := geo.DetectCountry(a); acc != "" {
+			cc = acc
+		}
+		return geo.DisplayName(a, ""), cc
+	}
+	return geo.DisplayName(base, cc), cc
 }
 
 // dayLabel: "22" -> "22 июн" (с сохранением ведущего нуля, как в app.py).

@@ -324,6 +324,8 @@ func (tb *Bot) onCallback(ctx context.Context, update *models.Update) {
 		text, kb = tb.handleVisCallback(cq.From.ID, cq.Data)
 	case strings.HasPrefix(cq.Data, "mute:"):
 		text, kb = tb.handleMuteCallback(cq.From.ID, cq.Data)
+	case strings.HasPrefix(cq.Data, "ren:"):
+		text, kb = tb.handleRenCallback(cq.From.ID, msgID, cq.Data)
 	case strings.HasPrefix(cq.Data, "cl:"):
 		text, kb = tb.handleCleanCallback(cq.From.ID, cq.Data)
 	default:
@@ -550,6 +552,9 @@ func (tb *Bot) handleAwait(ctx context.Context, chatID int64, await, txt string,
 	case "page_subtitle":
 		_ = tb.st.AddAudit(chatID, "subtitle_set", "", txt, auditRes(tb.st.SetSetting("subtitle", txt)))
 		text, kb = tb.pageText(), tb.pageKB()
+	case "ren_name":
+		tb.applyRename(chatID, txt)
+		text, kb = tb.renText(), tb.renKB(chatID)
 	case "page_desc":
 		_ = tb.st.AddAudit(chatID, "desc_set", "", txt, auditRes(tb.st.SetSetting("description", txt)))
 		text, kb = tb.pageText(), tb.pageKB()

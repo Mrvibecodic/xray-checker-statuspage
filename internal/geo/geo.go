@@ -4,6 +4,7 @@ package geo
 import (
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // RUMonths — короткие русские месяцы (индекс 1..12).
@@ -123,6 +124,15 @@ func ccFromFlag(name string) string {
 
 var prefixRe = regexp.MustCompile(`^([A-Za-zА-Яа-яЁё]{2,3})[\s\-_|.]+(.+)$`)
 
+func hasLetter(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
+}
+
 // DisplayName убирает флаг-эмодзи, а короткий префикс — только если он
 // дублирует определённую страну (cc); иначе префикс — часть имени сервера.
 func DisplayName(name, cc string) string {
@@ -139,8 +149,11 @@ func DisplayName(name, cc string) string {
 	if cc != "" {
 		if m := prefixRe.FindStringSubmatch(s); m != nil {
 			p := strings.ToLower(m[1])
-			if p == cc || DetectCountry(p) == cc {
-				s = strings.TrimSpace(m[2])
+			rest := strings.TrimSpace(m[2])
+			// «США-2», «DE 3»: без префикса остаётся голый номер — тогда префикс
+			// и есть имя, не срезаем.
+			if (p == cc || DetectCountry(p) == cc) && hasLetter(rest) {
+				s = rest
 			}
 		}
 	}

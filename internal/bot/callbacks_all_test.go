@@ -93,6 +93,11 @@ func TestAllCallbacks(t *testing.T) {
 		check("mute "+d, txt, kb)
 	}
 
+	for _, d := range []string{"ren:DE Frankfurt", "ren:pg:0", "ren:reset:x", "ren:" + nameTok("DE Frankfurt")} {
+		txt, kb := tb.handleRenCallback(1, 10, d)
+		check("ren "+d, txt, kb)
+	}
+
 	for _, d := range []string{"cl:auto", "cl:h:48", "cl:h:0", "cl:glob", "cl:absent", "cl:abspg:0", "cl:del:de1", "cl:dok:de1"} {
 		txt, kb := tb.handleCleanCallback(1, d)
 		check("clean "+d, txt, kb)

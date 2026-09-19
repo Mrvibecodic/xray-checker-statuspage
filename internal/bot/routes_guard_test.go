@@ -51,12 +51,12 @@ func TestEveryButtonIsRouted(t *testing.T) {
 		"noop": true, "m:doupdate": true, "m:restart": true, "m:upcheck": true,
 		"m:webstart": true, "m:webstop": true, "m:refresh": true, "sub:diag": true,
 	}
-	prefixes := []string{"set:", "mnt:", "inc:", "sub:", "vis:", "mute:", "cl:"}
+	prefixes := []string{"set:", "mnt:", "inc:", "sub:", "vis:", "mute:", "cl:", "ren:"}
 	sections := map[string]bool{
 		"m:home": true, "m:more": true, "m:page": true, "m:clean": true, "m:nginx": true,
 		"m:status": true, "m:servers": true, "m:stats": true, "m:incidents": true,
 		"m:maint": true, "m:vis": true, "m:sub": true, "m:settings": true,
-		"m:web": true, "m:audit": true, "m:update": true,
+		"m:web": true, "m:audit": true, "m:update": true, "m:ren": true,
 	}
 	routed := func(cb string) bool {
 		if exact[cb] || sections[cb] {
@@ -85,6 +85,7 @@ func TestEveryButtonIsRouted(t *testing.T) {
 		"ping":         pingKB(),
 		"summary":      summaryKB(),
 		"mute":         tb.muteKB(1),
+		"ren":          tb.renKB(1),
 		"web":          tb.webKB(),
 		"page":         tb.pageKB(),
 		"pageCancel":   pageCancelKB(),

@@ -203,9 +203,11 @@ func (s *Store) DeleteServer(sid string) (int, error) {
 		_, _ = tx.Exec(`DELETE FROM samples WHERE sid=?`, s)
 	}
 	_, _ = tx.Exec(`DELETE FROM hidden WHERE name=?`, name)
+	_, _ = tx.Exec(`DELETE FROM aliases WHERE name=?`, name)
 	if grp != "" {
-		// скрытие групп ключуется по имени группы — подчистим и его
+		// скрытие/имя групп ключуются по имени группы — подчистим и их
 		_, _ = tx.Exec(`DELETE FROM hidden WHERE name=?`, grp)
+		_, _ = tx.Exec(`DELETE FROM aliases WHERE name=?`, grp)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err

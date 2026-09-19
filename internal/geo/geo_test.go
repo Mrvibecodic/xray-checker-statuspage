@@ -36,6 +36,10 @@ func TestDisplayName(t *testing.T) {
 		{"🇫🇮 NH (Xray-Checker)", "fi", "NH (Xray-Checker)"},
 		// Префикс совпадает со страной флага — дубль, срезаем.
 		{"🇮🇳 IN Mumbai", "in", "Mumbai"},
+		// После префикса-страны остался только номер — имя целиком.
+		{"США-2", "us", "США-2"},
+		{"США 2", "us", "США 2"},
+		{"🇩🇪 DE #3", "de", "DE #3"},
 	}
 	for _, c := range cases {
 		if got := DisplayName(c.name, c.cc); got != c.want {
