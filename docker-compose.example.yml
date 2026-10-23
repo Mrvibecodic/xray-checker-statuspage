@@ -25,6 +25,11 @@ services:
       CHECKER_URL: "http://localhost:2112"
       TZ: "Europe/Moscow"
       TITLE: "Статус серверов"
+      # --- язык интерфейса: ru (по умолчанию) или en ---
+      # LANGUAGE: "ru"
+      # --- защита веб-UI паролем (HTTP Basic Auth); пусто = без пароля ---
+      # WEB_PASSWORD: ""
+      # WEB_USER: ""   # необяз.; если задан — логин должен совпасть
       # --- За своим reverse-proxy (nginx/Caddy/Traefik): раскомментируй, и сервис
       #     НЕ займёт 80/443 и НЕ будет поднимать TLS сам — этим займётся твой прокси.
       # PORT: "8080"

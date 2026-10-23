@@ -26,7 +26,7 @@ import (
 	"xray-status/internal/summary"
 )
 
-//go:embed assets/index.html.tpl assets/index2.html.tpl assets/index3.html.tpl assets/logo.svg assets/flags
+//go:embed assets/index.html.tpl assets/index2.html.tpl assets/index3.html.tpl assets/index.en.html.tpl assets/index2.en.html.tpl assets/index3.en.html.tpl assets/logo.svg assets/flags
 var assets embed.FS
 
 // uniqTokens — те же CSS/JS-токены, что рандомизирует Python-версия для
@@ -65,16 +65,53 @@ type Server struct {
 
 // New собирает страницу один раз на старте: применяет анти-фингерпринт и
 // подставляет плейсхолдеры (__TITLE__/__SUBTITLE__/__DAYS__/__LOGO__).
+
+func cfgLanguage(cfg config.Config) string {
+	for _, v := range []string{cfg.Language, cfg.Lang, cfg.Locale, cfg.UILanguage} {
+		if v = strings.TrimSpace(strings.ToLower(v)); v != "" {
+			return v
+		}
+	}
+	return "ru"
+}
+
+func cfgWebPassword(cfg config.Config) string {
+	for _, v := range []string{cfg.WebPassword, cfg.PagePassword, cfg.Password, cfg.UIPassword, cfg.WebUIPassword, cfg.BasicAuthPassword, cfg.AuthPassword, cfg.HTTPPassword, cfg.BasicPassword} {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func cfgWebUser(cfg config.Config) string {
+	for _, v := range []string{cfg.WebUser, cfg.WebUsername, cfg.BasicAuthUser, cfg.AuthUser, cfg.HTTPUser, cfg.BasicUser} {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func New(cfg config.Config, st *store.Store) *Server {
-	tplBytes, err := assets.ReadFile("assets/index.html.tpl")
+	lang := cfgLanguage(cfg)
+	tplName := "assets/index.html.tpl"
+	tpl2Name := "assets/index2.html.tpl"
+	tpl3Name := "assets/index3.html.tpl"
+	if strings.HasPrefix(lang, "en") {
+		tplName = "assets/index.en.html.tpl"
+		tpl2Name = "assets/index2.en.html.tpl"
+		tpl3Name = "assets/index3.en.html.tpl"
+	}
+	tplBytes, err := assets.ReadFile(tplName)
 	if err != nil {
 		panic("embed: index.html.tpl: " + err.Error())
 	}
-	tpl2Bytes, err := assets.ReadFile("assets/index2.html.tpl")
+	tpl2Bytes, err := assets.ReadFile(tpl2Name)
 	if err != nil {
 		panic("embed: index2.html.tpl: " + err.Error())
 	}
-	tpl3Bytes, err := assets.ReadFile("assets/index3.html.tpl")
+	tpl3Bytes, err := assets.ReadFile(tpl3Name)
 	if err != nil {
 		panic("embed: index3.html.tpl: " + err.Error())
 	}
@@ -104,7 +141,30 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/flags/", s.flagHandler)
 	mux.HandleFunc("/favicon.ico", s.faviconHandler)
 	mux.HandleFunc("/favicon.png", s.faviconHandler)
-	return s.baseHeaders(mux)
+	handler := http.Handler(mux)
+	if pwd := cfgWebPassword(s.cfg); pwd != "" {
+		handler = s.basicAuth(handler, pwd, cfgWebUser(s.cfg))
+	}
+	return s.baseHeaders(handler)
+}
+
+
+// basicAuth защищает веб-UI паролем (HTTP Basic Auth), если пароль задан.
+// /health и /healthz остаются открытыми для проб и оркестрации.
+func (s *Server) basicAuth(next http.Handler, password, user string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" || r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		u, p, ok := r.BasicAuth()
+		if !ok || p != password || (user != "" && u != user) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Status Page"`)
+			s.send(w, r, http.StatusUnauthorized, []byte("Unauthorized"), "text/plain; charset=utf-8", noCache)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +178,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	default:
 		theme = "dark"
 	}
+	lang := cfgLanguage(s.cfg)
 	title := s.st.GetSetting("title", s.cfg.Title)
 	subtitle := s.st.GetSetting("subtitle", s.cfg.Subtitle)
 	desc := s.st.GetSetting("description", s.cfg.Description)
@@ -138,6 +199,8 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	case "minimal":
 		src = s.page3
 	}
+	// set html lang attribute
+	src = []byte(strings.Replace(string(src), `lang="ru"`, `lang="`+lang+`"`, 1))
 	// АНТИ-ФИНГЕРПРИНТ: независимые случайные имена классов/id на каждый запрос,
 	// плюс рандомизация имени атрибута темы и его значений (нет константного
 	// html[data-theme="..."]-отпечатка между копиями).
