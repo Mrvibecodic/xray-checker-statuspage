@@ -76,7 +76,7 @@ func cfgLanguage(cfg config.Config) string {
 }
 
 func cfgWebPassword(cfg config.Config) string {
-	for _, v := range []string{cfg.WebPassword, cfg.PagePassword, cfg.Password, cfg.UIPassword, cfg.WebUIPassword, cfg.BasicAuthPassword, cfg.AuthPassword, cfg.HTTPPassword, cfg.BasicPassword} {
+	for _, v := range []string{cfg.WebPassword, cfg.PagePassword, cfg.Password, cfg.UIPassword, cfg.WebUIPassword, cfg.BasicAuthPassword} {
 		if v = strings.TrimSpace(v); v != "" {
 			return v
 		}
@@ -85,7 +85,7 @@ func cfgWebPassword(cfg config.Config) string {
 }
 
 func cfgWebUser(cfg config.Config) string {
-	for _, v := range []string{cfg.WebUser, cfg.WebUsername, cfg.BasicAuthUser, cfg.AuthUser, cfg.HTTPUser, cfg.BasicUser} {
+	for _, v := range []string{cfg.WebUser, cfg.WebUsername, cfg.BasicAuthUser} {
 		if v = strings.TrimSpace(v); v != "" {
 			return v
 		}

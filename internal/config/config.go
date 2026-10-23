@@ -46,15 +46,9 @@ type Config struct {
 	UIPassword      string
 	WebUIPassword   string
 	BasicAuthPassword string
-	AuthPassword      string
-	HTTPPassword      string
-	BasicPassword     string
 	WebUser         string
 	WebUsername     string
 	BasicAuthUser   string
-	AuthUser        string
-	HTTPUser        string
-	BasicUser       string
 
 	// Ретеншн / поведение поллера (паритет с app.py)
 	SampleRetainDays  int
@@ -207,15 +201,9 @@ func Load() Config {
 		UIPassword:      webPwd,
 		WebUIPassword:   webPwd,
 		BasicAuthPassword: webPwd,
-		AuthPassword:      webPwd,
-		HTTPPassword:      webPwd,
-		BasicPassword:     webPwd,
 		WebUser:         webUser,
 		WebUsername:     webUser,
 		BasicAuthUser:   webUser,
-		AuthUser:        webUser,
-		HTTPUser:        webUser,
-		BasicUser:       webUser,
 
 		SampleRetainDays:  atoi("SAMPLE_RETAIN_DAYS", days+1),
 		StaleAfterHours:   atoi("STALE_AFTER_HOURS", 0),
