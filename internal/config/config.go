@@ -36,19 +36,10 @@ type Config struct {
 	TLSMode         string
 
 	// Мультиязычность / защита веб-UI
-	Language        string
-	Lang            string
-	Locale          string
-	UILanguage      string
-	WebPassword     string
-	PagePassword    string
-	Password        string
-	UIPassword      string
-	WebUIPassword   string
-	BasicAuthPassword string
-	WebUser         string
-	WebUsername     string
-	BasicAuthUser   string
+	Language string
+	Locale   string
+	Username string
+	Password string
 
 	// Ретеншн / поведение поллера (паритет с app.py)
 	SampleRetainDays  int
@@ -163,12 +154,9 @@ func Load() Config {
 	// админам, поэтому ограничивать нечего). См. canControl.
 	caps := splitList("CONTROL_CAPS")
 	days := atoi("DAYS", 30)
-	lang := firstEnv("LANGUAGE", "LANG", "UI_LANGUAGE", "UI_LANG", "APP_LANGUAGE", "LOCALE")
-	if lang == "" {
-		lang = "ru"
-	}
-	webPwd := firstEnv("WEB_PASSWORD", "PAGE_PASSWORD", "PASSWORD", "UI_PASSWORD", "WEB_UI_PASSWORD", "BASIC_AUTH_PASSWORD", "WEBUI_PASSWORD", "AUTH_PASSWORD", "HTTP_PASSWORD", "PAGE_PASS")
-	webUser := firstEnv("WEB_USER", "WEB_USERNAME", "BASIC_AUTH_USER", "WEBUI_USER", "AUTH_USER", "HTTP_USER")
+	lang := getenv("LOCALE", "ru")
+	webPwd := getenv("PASSWORD", "")
+	webUser := getenv("USERNAME", "")
 	defUpdateURL := "https://github.com/Mrvibecodic/xray-checker-statuspage/releases/download/go-build/statuspage-linux-" + runtime.GOARCH
 	return Config{
 		Port:            getenv("PORT", "80"),
@@ -191,19 +179,10 @@ func Load() Config {
 		KeyFile:         getenv("KEY_FILE", ""),
 		TLSMode:         getenv("TLS_MODE", ""),
 
-		Language:        lang,
-		Lang:            lang,
-		Locale:          lang,
-		UILanguage:      lang,
-		WebPassword:     webPwd,
-		PagePassword:    webPwd,
-		Password:        webPwd,
-		UIPassword:      webPwd,
-		WebUIPassword:   webPwd,
-		BasicAuthPassword: webPwd,
-		WebUser:         webUser,
-		WebUsername:     webUser,
-		BasicAuthUser:   webUser,
+		Language: lang,
+		Locale:   lang,
+		Username: webUser,
+		Password: webPwd,
 
 		SampleRetainDays:  atoi("SAMPLE_RETAIN_DAYS", days+1),
 		StaleAfterHours:   atoi("STALE_AFTER_HOURS", 0),

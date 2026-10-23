@@ -67,30 +67,12 @@ type Server struct {
 // подставляет плейсхолдеры (__TITLE__/__SUBTITLE__/__DAYS__/__LOGO__).
 
 func cfgLanguage(cfg config.Config) string {
-	for _, v := range []string{cfg.Language, cfg.Lang, cfg.Locale, cfg.UILanguage} {
+	for _, v := range []string{cfg.Language, cfg.Locale} {
 		if v = strings.TrimSpace(strings.ToLower(v)); v != "" {
 			return v
 		}
 	}
 	return "ru"
-}
-
-func cfgWebPassword(cfg config.Config) string {
-	for _, v := range []string{cfg.WebPassword, cfg.PagePassword, cfg.Password, cfg.UIPassword, cfg.WebUIPassword, cfg.BasicAuthPassword} {
-		if v = strings.TrimSpace(v); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func cfgWebUser(cfg config.Config) string {
-	for _, v := range []string{cfg.WebUser, cfg.WebUsername, cfg.BasicAuthUser} {
-		if v = strings.TrimSpace(v); v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func New(cfg config.Config, st *store.Store) *Server {
@@ -142,8 +124,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/favicon.ico", s.faviconHandler)
 	mux.HandleFunc("/favicon.png", s.faviconHandler)
 	handler := http.Handler(mux)
-	if pwd := cfgWebPassword(s.cfg); pwd != "" {
-		handler = s.basicAuth(handler, pwd, cfgWebUser(s.cfg))
+	if pwd := strings.TrimSpace(s.cfg.Password); pwd != "" {
+		handler = s.basicAuth(handler, pwd, strings.TrimSpace(s.cfg.Username))
 	}
 	return s.baseHeaders(handler)
 }
