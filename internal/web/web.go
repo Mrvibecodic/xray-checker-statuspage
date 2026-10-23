@@ -67,7 +67,7 @@ type Server struct {
 // подставляет плейсхолдеры (__TITLE__/__SUBTITLE__/__DAYS__/__LOGO__).
 
 func cfgLanguage(cfg config.Config) string {
-	for _, v := range []string{cfg.Language, cfg.Locale} {
+	for _, v := range []string{cfg.Locale} {
 		if v = strings.TrimSpace(strings.ToLower(v)); v != "" {
 			return v
 		}

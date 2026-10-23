@@ -36,7 +36,6 @@ type Config struct {
 	TLSMode         string
 
 	// Мультиязычность / защита веб-UI
-	Language string
 	Locale   string
 	Username string
 	Password string
@@ -179,7 +178,6 @@ func Load() Config {
 		KeyFile:         getenv("KEY_FILE", ""),
 		TLSMode:         getenv("TLS_MODE", ""),
 
-		Language: lang,
 		Locale:   lang,
 		Username: webUser,
 		Password: webPwd,
