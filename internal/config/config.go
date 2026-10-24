@@ -36,9 +36,9 @@ type Config struct {
 	TLSMode         string
 
 	// Мультиязычность / защита веб-UI
-	Locale   string
-	Username string
-	Password string
+	Locale      string
+	WebUser     string
+	WebPassword string
 
 	// Ретеншн / поведение поллера (паритет с app.py)
 	SampleRetainDays  int
@@ -63,6 +63,11 @@ func getenv(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// IsEnglish — true для локалей вида "en", "en-US", "EN".
+func IsEnglish(locale string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "en")
 }
 
 func atoi(k string, def int) int {
@@ -135,17 +140,6 @@ func parseNotifyTargets(k string) []NotifyTarget {
 	return out
 }
 
-
-// firstEnv возвращает первое непустое значение из списка переменных окружения.
-func firstEnv(keys ...string) string {
-	for _, k := range keys {
-		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 // Load читает конфигурацию из окружения, подставляя дефолты, совместимые с
 // текущей Python-версией (app.py).
 func Load() Config {
@@ -154,8 +148,8 @@ func Load() Config {
 	caps := splitList("CONTROL_CAPS")
 	days := atoi("DAYS", 30)
 	lang := getenv("LOCALE", "ru")
-	webPwd := getenv("PASSWORD", "")
-	webUser := getenv("USERNAME", "")
+	webPwd := getenv("WEB_PASSWORD", "")
+	webUser := getenv("WEB_USER", "")
 	defUpdateURL := "https://github.com/Mrvibecodic/xray-checker-statuspage/releases/download/go-build/statuspage-linux-" + runtime.GOARCH
 	return Config{
 		Port:            getenv("PORT", "80"),
@@ -178,9 +172,9 @@ func Load() Config {
 		KeyFile:         getenv("KEY_FILE", ""),
 		TLSMode:         getenv("TLS_MODE", ""),
 
-		Locale:   lang,
-		Username: webUser,
-		Password: webPwd,
+		Locale:      lang,
+		WebUser:     webUser,
+		WebPassword: webPwd,
 
 		SampleRetainDays:  atoi("SAMPLE_RETAIN_DAYS", days+1),
 		StaleAfterHours:   atoi("STALE_AFTER_HOURS", 0),

@@ -129,8 +129,11 @@ func dayPayload(st *store.Store, cfg config.Config, loc *time.Location, sid stri
 
 	dt := time.Unix(ds, 0).In(loc)
 	label := "Сегодня"
+	if config.IsEnglish(cfg.Locale) {
+		label = "Today"
+	}
 	if !isToday {
-		label = pad2(dt.Day()) + " " + geo.RUMonths[int(dt.Month())]
+		label = pad2(dt.Day()) + " " + geo.MonthName(int(dt.Month()), cfg.Locale)
 	}
 
 	return map[string]any{

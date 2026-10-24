@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
+	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -26,7 +27,7 @@ import (
 	"xray-status/internal/summary"
 )
 
-//go:embed assets/index.html.tpl assets/index2.html.tpl assets/index3.html.tpl assets/index.en.html.tpl assets/index2.en.html.tpl assets/index3.en.html.tpl assets/logo.svg assets/flags
+//go:embed assets/index.html.tpl assets/index2.html.tpl assets/index3.html.tpl assets/logo.svg assets/flags
 var assets embed.FS
 
 // uniqTokens — те же CSS/JS-токены, что рандомизирует Python-версия для
@@ -61,39 +62,22 @@ type Server struct {
 	page2 []byte
 	page3 []byte
 	logo  []byte
+	tr    *strings.Replacer
 }
 
-// New собирает страницу один раз на старте: применяет анти-фингерпринт и
-// подставляет плейсхолдеры (__TITLE__/__SUBTITLE__/__DAYS__/__LOGO__).
-
-func cfgLanguage(cfg config.Config) string {
-	for _, v := range []string{cfg.Locale} {
-		if v = strings.TrimSpace(strings.ToLower(v)); v != "" {
-			return v
-		}
-	}
-	return "ru"
-}
-
+// New собирает страницу один раз на старте: подставляет __DAYS__ и готовит
+// языковую подстановку (__LANG__/__T_*__). Анти-фингерпринт (uniquify),
+// рандомизация темы и остальные плейсхолдеры применяются ПО-ЗАПРОСНО в index().
 func New(cfg config.Config, st *store.Store) *Server {
-	lang := cfgLanguage(cfg)
-	tplName := "assets/index.html.tpl"
-	tpl2Name := "assets/index2.html.tpl"
-	tpl3Name := "assets/index3.html.tpl"
-	if strings.HasPrefix(lang, "en") {
-		tplName = "assets/index.en.html.tpl"
-		tpl2Name = "assets/index2.en.html.tpl"
-		tpl3Name = "assets/index3.en.html.tpl"
-	}
-	tplBytes, err := assets.ReadFile(tplName)
+	tplBytes, err := assets.ReadFile("assets/index.html.tpl")
 	if err != nil {
 		panic("embed: index.html.tpl: " + err.Error())
 	}
-	tpl2Bytes, err := assets.ReadFile(tpl2Name)
+	tpl2Bytes, err := assets.ReadFile("assets/index2.html.tpl")
 	if err != nil {
 		panic("embed: index2.html.tpl: " + err.Error())
 	}
-	tpl3Bytes, err := assets.ReadFile(tpl3Name)
+	tpl3Bytes, err := assets.ReadFile("assets/index3.html.tpl")
 	if err != nil {
 		panic("embed: index3.html.tpl: " + err.Error())
 	}
@@ -108,7 +92,7 @@ func New(cfg config.Config, st *store.Store) *Server {
 	raw := strings.ReplaceAll(string(tplBytes), "__DAYS__", days)
 	raw2 := strings.ReplaceAll(string(tpl2Bytes), "__DAYS__", days)
 	raw3 := strings.ReplaceAll(string(tpl3Bytes), "__DAYS__", days)
-	return &Server{cfg: cfg, st: st, page: []byte(raw), page2: []byte(raw2), page3: []byte(raw3), logo: logo}
+	return &Server{cfg: cfg, st: st, page: []byte(raw), page2: []byte(raw2), page3: []byte(raw3), logo: logo, tr: trReplacer(cfg.Locale)}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -124,12 +108,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/favicon.ico", s.faviconHandler)
 	mux.HandleFunc("/favicon.png", s.faviconHandler)
 	handler := http.Handler(mux)
-	if pwd := strings.TrimSpace(s.cfg.Password); pwd != "" {
-		handler = s.basicAuth(handler, pwd, strings.TrimSpace(s.cfg.Username))
+	if pwd := strings.TrimSpace(s.cfg.WebPassword); pwd != "" {
+		handler = s.basicAuth(handler, pwd, strings.TrimSpace(s.cfg.WebUser))
 	}
 	return s.baseHeaders(handler)
 }
-
 
 // basicAuth защищает веб-UI паролем (HTTP Basic Auth), если пароль задан.
 // /health и /healthz остаются открытыми для проб и оркестрации.
@@ -140,7 +123,9 @@ func (s *Server) basicAuth(next http.Handler, password, user string) http.Handle
 			return
 		}
 		u, p, ok := r.BasicAuth()
-		if !ok || p != password || (user != "" && u != user) {
+		userOK := user == "" || subtle.ConstantTimeCompare([]byte(u), []byte(user)) == 1
+		passOK := ok && subtle.ConstantTimeCompare([]byte(p), []byte(password)) == 1
+		if !passOK || !userOK {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Status Page"`)
 			s.send(w, r, http.StatusUnauthorized, []byte("Unauthorized"), "text/plain; charset=utf-8", noCache)
 			return
@@ -160,7 +145,6 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	default:
 		theme = "dark"
 	}
-	lang := cfgLanguage(s.cfg)
 	title := s.st.GetSetting("title", s.cfg.Title)
 	subtitle := s.st.GetSetting("subtitle", s.cfg.Subtitle)
 	desc := s.st.GetSetting("description", s.cfg.Description)
@@ -181,12 +165,13 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	case "minimal":
 		src = s.page3
 	}
-	// set html lang attribute
-	src = []byte(strings.Replace(string(src), `lang="ru"`, `lang="`+lang+`"`, 1))
 	// АНТИ-ФИНГЕРПРИНТ: независимые случайные имена классов/id на каждый запрос,
 	// плюс рандомизация имени атрибута темы и его значений (нет константного
 	// html[data-theme="..."]-отпечатка между копиями).
 	page := randomizeTheme(uniquify(string(src), uniqTokens), theme)
+	// Язык подставляется ПОСЛЕ анти-фингерпринта: __T_*__ — верхний регистр,
+	// токены uniquify — нижний, пересечений нет.
+	page = s.tr.Replace(page)
 	rep := strings.NewReplacer(
 		"__TITLE__", html.EscapeString(title),
 		"__SUBTITLE__", html.EscapeString(subtitle),

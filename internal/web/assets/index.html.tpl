@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru" data-theme="__THEME__">
+<html lang="__LANG__" data-theme="__THEME__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -178,23 +178,23 @@ body{margin:0;background:var(--bg);color:var(--tx);
       <div><h1 id="title">__TITLE__</h1><p id="subtitle">__SUBTITLE__</p></div>
     </div>
     <div class="topr">
-      <div id="overall" class="pill ok"><span class="dot"></span><span>Загрузка…</span></div>
+      <div id="overall" class="pill ok"><span class="dot"></span><span>__T_LOADING__</span></div>
     </div>
   </div>
   <div class="stats">
-    <div class="stat"><div class="l">Серверов онлайн</div><div class="v" id="s-online">—</div></div>
-    <div class="stat"><div class="l">Аптайм за __DAYS__ дн</div><div class="v" id="s-uptime">—</div></div>
-    <div class="stat"><div class="l">Средний пинг</div><div class="v" id="s-ping">—</div></div>
+    <div class="stat"><div class="l">__T_SERVERS_ONLINE__</div><div class="v" id="s-online">—</div></div>
+    <div class="stat"><div class="l">__T_UPTIME_FOR__ __DAYS__ __T_DAY__</div><div class="v" id="s-uptime">—</div></div>
+    <div class="stat"><div class="l">__T_AVG_PING__</div><div class="v" id="s-ping">—</div></div>
   </div>
   <div id="incidents"></div>
-  <div id="list"><div class="skel">Загрузка данных…</div></div>
+  <div id="list"><div class="skel">__T_LOADING_DATA__</div></div>
   <div class="legend">
-    <span><i style="background:#16b07a"></i>норма</span>
-    <span><i style="background:#f0a82a"></i>до 30 мин</span>
-    <span><i style="background:#e3692f"></i>30 мин – 2 ч</span>
-    <span><i style="background:#e8504e"></i>от 2 ч</span>
-    <span><i style="background:#cfd6df"></i>нет данных</span>
-    <span class="right">← __DAYS__ дней назад · сегодня →</span>
+    <span><i style="background:#16b07a"></i>__T_LEG_OK__</span>
+    <span><i style="background:#f0a82a"></i>__T_LEG_30__</span>
+    <span><i style="background:#e3692f"></i>__T_LEG_2H__</span>
+    <span><i style="background:#e8504e"></i>__T_LEG_DOWN__</span>
+    <span><i style="background:#cfd6df"></i>__T_NODATA__</span>
+    <span class="right">← __DAYS__ __T_RANGE__ →</span>
   </div>
   <div class="foot" id="foot"></div>
 </div>
@@ -210,10 +210,10 @@ function colorFor(d){
   return "#e8504e";
 }
 function fmtDur(m){
-  if(m<=0) return "0 мин";
-  if(m>=1440){var dd=Math.floor(m/1440),h=Math.round((m%1440)/60);return dd+" дн"+(h?" "+h+" ч":"");}
-  if(m>=60){var h=Math.floor(m/60),mm=m%60;return h+" ч"+(mm?" "+mm+" мин":"");}
-  return m+" мин";
+  if(m<=0) return "0 __T_MIN__";
+  if(m>=1440){var dd=Math.floor(m/1440),h=Math.round((m%1440)/60);return dd+" __T_DAY__"+(h?" "+h+" __T_HOUR__":"");}
+  if(m>=60){var h=Math.floor(m/60),mm=m%60;return h+" __T_HOUR__"+(mm?" "+mm+" __T_MIN__":"");}
+  return m+" __T_MIN__";
 }
 function pad2(n){return ("0"+n).slice(-2);}
 function localHM(ts){var d=new Date(ts*1000);return pad2(d.getHours())+":"+pad2(d.getMinutes());}
@@ -222,8 +222,8 @@ function localSmart(ts){var d=new Date(ts*1000);return pad2(d.getDate())+"."+pad
 function fmtTime(ts,ds){return localHM(ts);}
 function maintLabel(s){
   if(!s.maintenance)return "";
-  var t="на обслуживании";
-  if(s.maintTo&&s.maintTo>0)t+=" · до "+localSmart(s.maintTo);
+  var t="__T_MAINT__";
+  if(s.maintTo&&s.maintTo>0)t+="__T_UNTIL__"+localSmart(s.maintTo);
   return t;
 }
 function escapeHtml(s){var d=document.createElement("div");d.textContent=s;return d.innerHTML;}
@@ -239,28 +239,28 @@ function hideTip(){tip.style.opacity="0";}
 function showTipDay(e,d){
   var u=d.uptime;
   var uc=(u===null)?"var(--tx2)":(u>=99.99?"var(--ok)":(u>=95?"var(--warn)":"var(--bad)"));
-  var ut=(u===null)?"нет данных":u.toFixed(2)+"%";
+  var ut=(u===null)?"__T_NODATA__":u.toFixed(2)+"%";
   var down=!d.hasData?''
-    :d.downMin>0?'<div class="k">простой: <b style="color:var(--bad)">'+fmtDur(d.downMin)+'</b></div>'
-    :((d.uptime!==null&&d.uptime<100)?'<div class="k">кратковременный сбой</div>':'<div class="k">сбоев нет</div>');
-  tip.innerHTML='<div class="d">'+d.label+'</div><div class="k">аптайм: <b style="color:'+uc+'">'+ut+'</b></div>'+down;
+    :d.downMin>0?'<div class="k">__T_DOWNTIME__<b style="color:var(--bad)">'+fmtDur(d.downMin)+'</b></div>'
+    :((d.uptime!==null&&d.uptime<100)?'<div class="k">__T_BRIEF__</div>':'<div class="k">__T_NOOUT__</div>');
+  tip.innerHTML='<div class="d">'+d.label+'</div><div class="k">__T_UPTIME__<b style="color:'+uc+'">'+ut+'</b></div>'+down;
   tip.style.opacity="1";moveTip(e);
 }
 function showTipServer(e,s){
   var u=s.uptime30;
   var uc=(u===null)?"var(--tx2)":(u>=99.9?"var(--ok)":(u>=99?"var(--warn)":"var(--bad)"));
-  var ut=(u===null)?"нет данных":u.toFixed(2)+"%";
-  var dm=(s.downMin30>0)?'<b style="color:var(--bad)">'+fmtDur(s.downMin30)+'</b>':'<b style="color:var(--ok)">0 мин</b>';
+  var ut=(u===null)?"__T_NODATA__":u.toFixed(2)+"%";
+  var dm=(s.downMin30>0)?'<b style="color:var(--bad)">'+fmtDur(s.downMin30)+'</b>':'<b style="color:var(--ok)">0 __T_MIN__</b>';
   tip.innerHTML='<div class="d">'+escapeHtml(s.name)+'</div>'+
-    '<div class="k">статус: '+(s.online?'<b style="color:var(--ok)">онлайн</b>':'<b style="color:var(--bad)">офлайн</b>')+'</div>'+
-    '<div class="k">аптайм 30 дн: <b style="color:'+uc+'">'+ut+'</b></div>'+
-    '<div class="k">общий простой: '+dm+'</div>';
+    '<div class="k">__T_STATUS__'+(s.online?'<b style="color:var(--ok)">__T_ONLINE__</b>':'<b style="color:var(--bad)">__T_OFFLINE__</b>')+'</div>'+
+    '<div class="k">__T_UP30__<b style="color:'+uc+'">'+ut+'</b></div>'+
+    '<div class="k">__T_TOTALDOWN__'+dm+'</div>';
   tip.style.opacity="1";moveTip(e);
 }
 function renderToday(panel,data){
-  var head=data.dayLabel||"Сегодня";
+  var head=data.dayLabel||"__T_TODAY__";
   if(!data.samples.length){
-    panel.innerHTML='<div class="phead">'+head+'</div><div class="empty">Данных за этот день нет.</div>';
+    panel.innerHTML='<div class="phead">'+head+'</div><div class="empty">__T_NODAYDATA__</div>';
     panelH(panel);return;
   }
   var ds=data.dayStart,span=86400,W=1000;
@@ -299,13 +299,13 @@ function renderToday(panel,data){
   var axis="";for(var h2=0;h2<=24;h2+=3){axis+='<span>'+("0"+h2).slice(-2)+':00</span>';}
   var st=data.stats,last=data.samples[data.samples.length-1];
   var stats='<div class="tstats">'+
-    '<div><span>'+(data.isToday?"Проверок сегодня":"Проверок за день")+'</span><b>'+st.checks+'</b></div>'+
-    '<div><span>Ошибок опроса</span><b style="color:'+(st.errors?"var(--bad)":"var(--ok)")+'">'+st.errors+'</b></div>'+
-    '<div><span>'+(data.isToday?"Пинг сейчас":"Последний пинг")+'</span><b>'+(last.online?last.latency+" мс":"—")+'</b></div>'+
-    '<div><span>Пинг мин / сред / макс</span><b>'+(st.pavg?st.pmin+" / "+st.pavg+" / "+st.pmax+" мс":"—")+'</b></div>'+
+    '<div><span>'+(data.isToday?"__T_CHECKS_TODAY__":"__T_CHECKS_DAY__")+'</span><b>'+st.checks+'</b></div>'+
+    '<div><span>__T_POLLERRS__</span><b style="color:'+(st.errors?"var(--bad)":"var(--ok)")+'">'+st.errors+'</b></div>'+
+    '<div><span>'+(data.isToday?"__T_PING_NOW__":"__T_PING_LAST__")+'</span><b>'+(last.online?last.latency+" __T_MS__":"—")+'</b></div>'+
+    '<div><span>__T_PING_STATS__</span><b>'+(st.pavg?st.pmin+" / "+st.pavg+" / "+st.pmax+" __T_MS__":"—")+'</b></div>'+
     '</div>';
-  var cap='Пинг, мс · логарифмическая шкала · макс '+(data.stats.pmax||0)+' мс';
-  panel.innerHTML='<div class="phead">'+head+' · синяя линия — пинг, красные полосы — периоды сбоев</div>'+
+  var cap='__T_PINGCAP__'+(data.stats.pmax||0)+' __T_MS__';
+  panel.innerHTML='<div class="phead">'+head+'__T_CHARTHINT__</div>'+
     stats+
     '<div class="tcaption">'+cap+'</div>'+
     '<div class="tchartwrap">'+
@@ -329,8 +329,8 @@ function renderToday(panel,data){
     var x=(best.ts-ds)/span*1000;
     cursor.setAttribute("x1",x);cursor.setAttribute("x2",x);cursor.setAttribute("opacity","1");
     tip.innerHTML='<div class="d">'+fmtTime(best.ts,ds)+'</div>'+
-      (best.online?'<div class="k">опрос: <b style="color:var(--ok)">успешно</b></div><div class="k">пинг: <b>'+best.latency+' мс</b></div>'
-                  :'<div class="k"><b style="color:var(--bad)">ошибка опроса</b></div>');
+      (best.online?'<div class="k">__T_POLL__<b style="color:var(--ok)">__T_SUCCESS__</b></div><div class="k">__T_PING__<b>'+best.latency+' __T_MS__</b></div>'
+                  :'<div class="k"><b style="color:var(--bad)">__T_POLLERR1__</b></div>');
     tip.style.opacity="1";moveTip(ev);
   }
   svgEl.addEventListener("mousemove",function(e){scrub(e.clientX,e);});
@@ -350,7 +350,7 @@ function updateTop(data){
   var t=data.totals;
   var onlineEl=document.getElementById("s-online");
   var oh=t.online+" / "+t.total;
-  if(t.maintenance&&t.maintenance>0)oh+=' <span class="vsub" title="'+t.maintenance+' на обслуживании">🛠 '+t.maintenance+'</span>';
+  if(t.maintenance&&t.maintenance>0)oh+=' <span class="vsub" title="'+t.maintenance+' __T_MAINT__">🛠 '+t.maintenance+'</span>';
   onlineEl.innerHTML=oh;
   document.getElementById("s-uptime").textContent=(t.uptime30===null?"—":t.uptime30.toFixed(2)+"%");
   document.getElementById("s-ping").textContent=(t.avgLatency?t.avgLatency+" ms":"—");
@@ -358,10 +358,10 @@ function updateTop(data){
   var ov=document.getElementById("overall");
   ov.className="pill "+(allUp?"ok":"bad");
   ov.innerHTML='<span class="dot" style="background:currentColor"></span><span>'+
-    (allUp?"Все системы в норме":(t.total-t.online)+" сервер(ов) недоступно")+'</span>';
+    (allUp?"__T_ALL_OK__":(t.total-t.online)+"__T_UNAVAIL__")+'</span>';
   document.getElementById("foot").textContent=
-    (data.lastCheckTs?"последняя проверка "+localDateHM(data.lastCheckTs):(data.lastCheck?"последняя проверка "+data.lastCheck:"ожидание первой проверки"))+
-    (data.pollInterval?" · обновление раз в "+Math.round(data.pollInterval/60*10)/10+" мин":"");
+    (data.lastCheckTs?"__T_LASTCHECK__"+localDateHM(data.lastCheckTs):(data.lastCheck?"__T_LASTCHECK__"+data.lastCheck:"__T_WAITFIRST__"))+
+    (data.pollInterval?"__T_UPDATEEVERY__"+Math.round(data.pollInterval/60*10)/10+" __T_MIN__":"");
 }
 function panelH(panel){
   var it=panel.parentElement;
@@ -369,11 +369,11 @@ function panelH(panel){
 }
 function openPanel(panel,sid){
   hideTip();
-  if(!panel.innerHTML.trim()||panel.querySelector(".empty"))panel.innerHTML='<div class="empty">Загрузка…</div>';
+  if(!panel.innerHTML.trim()||panel.querySelector(".empty"))panel.innerHTML='<div class="empty">__T_LOADING__</div>';
   fetch("api/today?sid="+encodeURIComponent(sid))
     .then(function(r){return r.json();})
     .then(function(td){renderToday(panel,td);})
-    .catch(function(){panel.innerHTML='<div class="empty">Не удалось загрузить.</div>';panelH(panel);});
+    .catch(function(){panel.innerHTML='<div class="empty">__T_LOADFAIL__</div>';panelH(panel);});
 }
 function refreshPanel(panel,sid){
   var sc=panel.querySelector(".tscroll");
@@ -388,24 +388,24 @@ function refreshPanel(panel,sid){
 }
 function loadDay(panel,sid,date){
   hideTip();
-  if(!panel.innerHTML.trim()||panel.querySelector(".empty"))panel.innerHTML='<div class="empty">Загрузка…</div>';
+  if(!panel.innerHTML.trim()||panel.querySelector(".empty"))panel.innerHTML='<div class="empty">__T_LOADING__</div>';
   fetch("api/day?sid="+encodeURIComponent(sid)+"&date="+encodeURIComponent(date))
     .then(function(r){return r.json();})
     .then(function(td){renderToday(panel,td);})
-    .catch(function(){panel.innerHTML='<div class="empty">Не удалось загрузить.</div>';panelH(panel);});
+    .catch(function(){panel.innerHTML='<div class="empty">__T_LOADFAIL__</div>';panelH(panel);});
 }
 function applyServer(item,s,days){
   item._label._s=s;
   item._dot.style.background=s.maintenance?"#2f8fff":(s.online?"#16b07a":"#e8504e");
   for(var i=0;i<item._bars.length;i++){var d=s.days[i];if(d){item._bars[i]._d=d;item._bars[i].setAttribute("fill",colorFor(d));}}
   if(s.maintenance){
-    item._p.textContent="обслуж.";
+    item._p.textContent="__T_MAINTSHORT__";
     item._p.style.color="var(--info)";
-    item._s2.textContent=(s.maintTo&&s.maintTo>0)?("≈ до "+localSmart(s.maintTo)):"идут работы";
+    item._s2.textContent=(s.maintTo&&s.maintTo>0)?("__T_UNTIL_APPROX__"+localSmart(s.maintTo)):"__T_INPROGRESS__";
   }else{
     item._p.textContent=(s.uptime30===null)?"—":s.uptime30.toFixed(2)+"%";
     item._p.style.color=srvUpColor(s.uptime30);
-    item._s2.textContent=(s.latencyMs?s.latencyMs+" ms · ":"")+days+" дн"+(s.members>1?" · "+s.membersOnline+"/"+s.members+" узлов":"");
+    item._s2.textContent=(s.latencyMs?s.latencyMs+" ms · ":"")+days+" __T_DAY__"+(s.members>1?" · "+s.membersOnline+"/"+s.members+"__T_NODES__":"");
   }
 }
 function buildList(data){
@@ -444,7 +444,7 @@ function buildList(data){
     var chev=document.createElement("div");chev.className="chev";
     chev.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
     row.appendChild(label);row.appendChild(bars);row.appendChild(st2);row.appendChild(chev);
-    var panel=document.createElement("div");panel.className="panel";panel.innerHTML='<div class="empty">Загрузка…</div>';
+    var panel=document.createElement("div");panel.className="panel";panel.innerHTML='<div class="empty">__T_LOADING__</div>';
     row.addEventListener("click",function(){
       if(item.classList.contains("open")){
         panel.style.maxHeight=panel.scrollHeight+"px";
@@ -472,11 +472,11 @@ function renderIncidents(data){
   var incs=(data&&data.incidents)||[];
   if(!incs.length){el.innerHTML="";el.style.display="none";return;}
   el.style.display="";
-  var sev={minor:"Незначительный",major:"Серьёзный",critical:"Критический"};
-  var stt={investigating:"Расследуем",identified:"Причина найдена",monitoring:"Наблюдаем",resolved:"Устранён"};
+  var sev={minor:"__T_SEV_MINOR__",major:"__T_SEV_MAJOR__",critical:"__T_SEV_CRIT__"};
+  var stt={investigating:"__T_ST_INV__",identified:"__T_ST_IDENT__",monitoring:"__T_ST_MON__",resolved:"__T_ST_RES__"};
   var html="";
   incs.forEach(function(i){var sv=i.severity||"minor";
-    var started=i.startedTs?'<span class="inc-time">🕒 начат '+localSmart(i.startedTs)+'</span>':'';
+    var started=i.startedTs?'<span class="inc-time">__T_STARTED__'+localSmart(i.startedTs)+'</span>':'';
     var aff='';
     if(i.affected&&i.affected.length){
       var ap=i.affected.map(function(a){
@@ -484,13 +484,13 @@ function renderIncidents(data){
         var f=a.cc?'<img class="flag" src="flags/'+a.cc+'.svg" alt="" loading="lazy">':'<img class="flag" src="flags/xx.svg" alt="" loading="lazy">';
         return f+escapeHtml(a.name||"");
       });
-      aff='<div class="inc-aff">🎯 затронуты: '+ap.join(", ")+'</div>';
+      aff='<div class="inc-aff">__T_AFFECTED__'+ap.join(", ")+'</div>';
     }
     var tl='';
     if(i.updates&&i.updates.length){
       tl='<div class="inc-tl">';
       i.updates.forEach(function(u){
-        var body=(u.body&&u.body!=="статус обновлён")?' — '+escapeHtml(u.body):'';
+        var body=(u.body&&u.body!=="статус обновлён"&&u.body!=="status updated")?' — '+escapeHtml(u.body):'';
         tl+='<div class="inc-tlrow"><span class="inc-tlt">'+localSmart(u.ts)+'</span><span class="inc-tls">'+escapeHtml(stt[u.status]||u.status||'')+'</span>'+body+'</div>';
       });
       tl+='</div>';
@@ -521,7 +521,7 @@ function load(){
     built=false;
     var list=document.getElementById("list");
     if(!list.querySelector(".item")){
-      list.innerHTML='<div class="skel">Обновление не удалось — пробуем снова…</div>';
+      list.innerHTML='<div class="skel">__T_UPDATEFAILED__</div>';
     }
   });
 }
