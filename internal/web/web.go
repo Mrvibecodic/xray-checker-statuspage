@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
+	"crypto/subtle"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -61,10 +62,12 @@ type Server struct {
 	page2 []byte
 	page3 []byte
 	logo  []byte
+	tr    *strings.Replacer
 }
 
-// New собирает страницу один раз на старте: применяет анти-фингерпринт и
-// подставляет плейсхолдеры (__TITLE__/__SUBTITLE__/__DAYS__/__LOGO__).
+// New собирает страницу один раз на старте: подставляет __DAYS__ и готовит
+// языковую подстановку (__LANG__/__T_*__). Анти-фингерпринт (uniquify),
+// рандомизация темы и остальные плейсхолдеры применяются ПО-ЗАПРОСНО в index().
 func New(cfg config.Config, st *store.Store) *Server {
 	tplBytes, err := assets.ReadFile("assets/index.html.tpl")
 	if err != nil {
@@ -89,7 +92,7 @@ func New(cfg config.Config, st *store.Store) *Server {
 	raw := strings.ReplaceAll(string(tplBytes), "__DAYS__", days)
 	raw2 := strings.ReplaceAll(string(tpl2Bytes), "__DAYS__", days)
 	raw3 := strings.ReplaceAll(string(tpl3Bytes), "__DAYS__", days)
-	return &Server{cfg: cfg, st: st, page: []byte(raw), page2: []byte(raw2), page3: []byte(raw3), logo: logo}
+	return &Server{cfg: cfg, st: st, page: []byte(raw), page2: []byte(raw2), page3: []byte(raw3), logo: logo, tr: trReplacer(cfg.Locale)}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -104,7 +107,31 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/flags/", s.flagHandler)
 	mux.HandleFunc("/favicon.ico", s.faviconHandler)
 	mux.HandleFunc("/favicon.png", s.faviconHandler)
-	return s.baseHeaders(mux)
+	handler := http.Handler(mux)
+	if pwd := strings.TrimSpace(s.cfg.WebPassword); pwd != "" {
+		handler = s.basicAuth(handler, pwd, strings.TrimSpace(s.cfg.WebUser))
+	}
+	return s.baseHeaders(handler)
+}
+
+// basicAuth защищает веб-UI паролем (HTTP Basic Auth), если пароль задан.
+// /health и /healthz остаются открытыми для проб и оркестрации.
+func (s *Server) basicAuth(next http.Handler, password, user string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" || r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		u, p, ok := r.BasicAuth()
+		userOK := user == "" || subtle.ConstantTimeCompare([]byte(u), []byte(user)) == 1
+		passOK := ok && subtle.ConstantTimeCompare([]byte(p), []byte(password)) == 1
+		if !passOK || !userOK {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Status Page"`)
+			s.send(w, r, http.StatusUnauthorized, []byte("Unauthorized"), "text/plain; charset=utf-8", noCache)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +169,9 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	// плюс рандомизация имени атрибута темы и его значений (нет константного
 	// html[data-theme="..."]-отпечатка между копиями).
 	page := randomizeTheme(uniquify(string(src), uniqTokens), theme)
+	// Язык подставляется ПОСЛЕ анти-фингерпринта: __T_*__ — верхний регистр,
+	// токены uniquify — нижний, пересечений нет.
+	page = s.tr.Replace(page)
 	rep := strings.NewReplacer(
 		"__TITLE__", html.EscapeString(title),
 		"__SUBTITLE__", html.EscapeString(subtitle),

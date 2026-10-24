@@ -35,6 +35,11 @@ type Config struct {
 	KeyFile         string
 	TLSMode         string
 
+	// Мультиязычность / защита веб-UI
+	Locale      string
+	WebUser     string
+	WebPassword string
+
 	// Ретеншн / поведение поллера (паритет с app.py)
 	SampleRetainDays  int
 	StaleAfterHours   int
@@ -58,6 +63,11 @@ func getenv(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// IsEnglish — true для локалей вида "en", "en-US", "EN".
+func IsEnglish(locale string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "en")
 }
 
 func atoi(k string, def int) int {
@@ -137,6 +147,9 @@ func Load() Config {
 	// админам, поэтому ограничивать нечего). См. canControl.
 	caps := splitList("CONTROL_CAPS")
 	days := atoi("DAYS", 30)
+	lang := getenv("LOCALE", "ru")
+	webPwd := getenv("WEB_PASSWORD", "")
+	webUser := getenv("WEB_USER", "")
 	defUpdateURL := "https://github.com/Mrvibecodic/xray-checker-statuspage/releases/download/go-build/statuspage-linux-" + runtime.GOARCH
 	return Config{
 		Port:            getenv("PORT", "80"),
@@ -158,6 +171,10 @@ func Load() Config {
 		CertFile:        getenv("CERT_FILE", ""),
 		KeyFile:         getenv("KEY_FILE", ""),
 		TLSMode:         getenv("TLS_MODE", ""),
+
+		Locale:      lang,
+		WebUser:     webUser,
+		WebPassword: webPwd,
 
 		SampleRetainDays:  atoi("SAMPLE_RETAIN_DAYS", days+1),
 		StaleAfterHours:   atoi("STALE_AFTER_HOURS", 0),

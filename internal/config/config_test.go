@@ -39,3 +39,22 @@ func TestTelegramProxy(t *testing.T) {
 		t.Fatalf("unexpected TelegramProxy: %q", got)
 	}
 }
+
+func TestLocaleAndWebAuthEnv(t *testing.T) {
+	for _, k := range []string{"LOCALE", "WEB_PASSWORD", "WEB_USER"} {
+		t.Setenv(k, "")
+	}
+	if c := Load(); c.Locale != "ru" || c.WebPassword != "" || c.WebUser != "" {
+		t.Fatalf("defaults: got locale=%q user=%q pwd-set=%v", c.Locale, c.WebUser, c.WebPassword != "")
+	}
+	t.Setenv("LOCALE", "en")
+	t.Setenv("WEB_PASSWORD", "s3cret")
+	t.Setenv("WEB_USER", "admin")
+	c := Load()
+	if c.Locale != "en" || c.WebPassword != "s3cret" || c.WebUser != "admin" {
+		t.Fatalf("env not loaded: %+v", c)
+	}
+	if !IsEnglish(c.Locale) || IsEnglish("ru") {
+		t.Fatal("IsEnglish mismatch")
+	}
+}

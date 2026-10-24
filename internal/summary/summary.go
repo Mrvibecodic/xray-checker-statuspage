@@ -163,7 +163,7 @@ func BuildSummary(st *store.Store, cfg config.Config, admin bool) (map[string]an
 			} else {
 				uptime = nil
 			}
-			label := dayLabel(d)
+			label := dayLabel(d, cfg.Locale)
 			hasData := sumTotal > 0
 			days = append(days, map[string]any{
 				"date": d, "label": label, "uptime": uptime,
@@ -344,8 +344,9 @@ func PageName(raw string, aliases map[string]string) (string, string) {
 	return geo.DisplayName(base, cc), cc
 }
 
-// dayLabel: "22" -> "22 июн" (с сохранением ведущего нуля, как в app.py).
-func dayLabel(d string) string {
+// dayLabel: "2026-10-05" -> "05 окт" (ru) или "05 Oct" (en)
+// (с сохранением ведущего нуля, как в app.py).
+func dayLabel(d, locale string) string {
 	parts := strings.Split(d, "-")
 	if len(parts) != 3 {
 		return d
@@ -357,5 +358,5 @@ func dayLabel(d string) string {
 	if mo < 1 || mo > 12 {
 		return d
 	}
-	return parts[2] + " " + geo.RUMonths[mo]
+	return parts[2] + " " + geo.MonthName(mo, locale)
 }

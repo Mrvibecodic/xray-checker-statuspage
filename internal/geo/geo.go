@@ -11,6 +11,22 @@ import (
 var RUMonths = []string{"", "янв", "фев", "мар", "апр", "май", "июн",
 	"июл", "авг", "сен", "окт", "ноя", "дек"}
 
+// ENMonths — короткие английские месяцы (индекс 1..12).
+var ENMonths = []string{"", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+	"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
+
+// MonthName — короткое название месяца для локали ("ru" по умолчанию, "en*"
+// для английских). mo — 1..12, вне диапазона возвращает "".
+func MonthName(mo int, locale string) string {
+	if mo < 1 || mo > 12 {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "en") {
+		return ENMonths[mo]
+	}
+	return RUMonths[mo]
+}
+
 type ccKW struct{ kw, cc string }
 
 var countryKeywords = []ccKW{
