@@ -6,6 +6,7 @@ package bot
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +37,9 @@ type Bot struct {
 	alertTargets []alertTarget
 	upd          *updater.Updater
 	web          webStarter
+	// tgHTTP — клиент с TELEGRAM_PROXY (nil = прокси не задан). Нужен и для
+	// скачивания файлов: они лежат на том же api.telegram.org, что и Bot API.
+	tgHTTP *http.Client
 
 	mu       sync.Mutex
 	lastDown map[string]bool // name -> последнее отправленное состояние (true=down)
@@ -101,6 +105,7 @@ func New(cfg config.Config, st *store.Store) (*Bot, error) {
 		if err != nil {
 			return nil, err
 		}
+		tb.tgHTTP = client
 		options = append(options, bot.WithHTTPClient(telegramPollTimeout, client))
 	}
 	b, err := bot.New(cfg.BotToken, options...)

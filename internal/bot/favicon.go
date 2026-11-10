@@ -2,8 +2,11 @@ package bot
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -37,7 +40,7 @@ func (tb *Bot) handleFaviconUpload(ctx context.Context, chatID int64, msg *model
 	note := "✅ Фавикон обновлён.\n\n"
 	if f, err := tb.b.GetFile(ctx, &bot.GetFileParams{FileID: fileID}); err != nil {
 		note = "❌ Не удалось получить файл: " + htmlEscape(err.Error()) + "\n\n"
-	} else if data, derr := downloadLimited(ctx, tb.b.FileDownloadLink(f), 1<<20); derr != nil {
+	} else if data, derr := downloadLimited(ctx, tb.fileHTTPClient(), tb.b.FileDownloadLink(f), 1<<20); derr != nil {
 		note = "❌ Ошибка загрузки: " + htmlEscape(derr.Error()) + "\n\n"
 	} else {
 		if mime == "" {
@@ -57,16 +60,37 @@ func (tb *Bot) handleFaviconUpload(ctx context.Context, chatID int64, msg *model
 	}
 }
 
-func downloadLimited(ctx context.Context, url string, max int64) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
+// directFileHTTP — клиент для файлов Telegram, когда TELEGRAM_PROXY не задан.
+var directFileHTTP = &http.Client{Timeout: telegramPollTimeout}
+
+// fileHTTPClient отдаёт клиент для скачивания файлов Telegram: тот же, что ходит
+// в Bot API (через TELEGRAM_PROXY), иначе прямой.
+func (tb *Bot) fileHTTPClient() *http.Client {
+	if tb.tgHTTP != nil {
+		return tb.tgHTTP
 	}
-	resp, err := http.DefaultClient.Do(req)
+	return directFileHTTP
+}
+
+// downloadLimited скачивает не больше max байт. Ссылка на файл Telegram содержит
+// токен бота, поэтому в ошибки она не попадает: их текст уходит в чат.
+func downloadLimited(ctx context.Context, client *http.Client, link string, max int64) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("некорректная ссылка на файл")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			return nil, uerr.Err
+		}
+		return nil, errors.New("не удалось скачать файл")
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ответ Telegram: HTTP %d", resp.StatusCode)
+	}
 	return io.ReadAll(io.LimitReader(resp.Body, max))
 }
 
