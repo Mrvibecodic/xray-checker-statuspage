@@ -14,19 +14,30 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
+// faviconMaxBytes — предел размера фавикона: больший файл отклоняется целиком.
+const faviconMaxBytes = 1 << 20
+
+const faviconTooBigNote = "❌ Файл больше 1 МБ — пришли картинку поменьше.\n\n"
+
+var errFileTooLarge = errors.New("файл больше допустимого размера")
+
 // handleFaviconUpload принимает картинку (документ/фото), скачивает её через
 // Telegram и сохраняет как фавикон публичной страницы.
 func (tb *Bot) handleFaviconUpload(ctx context.Context, chatID int64, msg *models.Message) {
 	awaitMsg := tb.st.GetBotState(chatID, "await_msg")
 
 	var fileID, mime string
+	var size int64
 	switch {
 	case msg.Document != nil:
 		fileID = msg.Document.FileID
 		mime = msg.Document.MimeType
+		size = msg.Document.FileSize
 	case len(msg.Photo) > 0:
-		fileID = msg.Photo[len(msg.Photo)-1].FileID
+		photo := msg.Photo[len(msg.Photo)-1]
+		fileID = photo.FileID
 		mime = "image/jpeg"
+		size = int64(photo.FileSize)
 	}
 	if fileID == "" {
 		tb.reply(ctx, chatID, "Пришли картинку фавикона — PNG/SVG/ICO (лучше как документ, чтобы без сжатия).")
@@ -38,9 +49,14 @@ func (tb *Bot) handleFaviconUpload(ctx context.Context, chatID int64, msg *model
 	_, _ = tb.b.DeleteMessage(ctx, &bot.DeleteMessageParams{ChatID: chatID, MessageID: msg.ID})
 
 	note := "✅ Фавикон обновлён.\n\n"
-	if f, err := tb.b.GetFile(ctx, &bot.GetFileParams{FileID: fileID}); err != nil {
+	if size > faviconMaxBytes {
+		// размер известен заранее — не скачиваем (и getFile не отдаёт файлы >20 МБ)
+		note = faviconTooBigNote
+	} else if f, err := tb.b.GetFile(ctx, &bot.GetFileParams{FileID: fileID}); err != nil {
 		note = "❌ Не удалось получить файл: " + htmlEscape(err.Error()) + "\n\n"
-	} else if data, derr := downloadLimited(ctx, tb.fileHTTPClient(), tb.b.FileDownloadLink(f), 1<<20); derr != nil {
+	} else if data, derr := downloadLimited(ctx, tb.fileHTTPClient(), tb.b.FileDownloadLink(f), faviconMaxBytes); errors.Is(derr, errFileTooLarge) {
+		note = faviconTooBigNote
+	} else if derr != nil {
 		note = "❌ Ошибка загрузки: " + htmlEscape(derr.Error()) + "\n\n"
 	} else {
 		if mime == "" {
@@ -72,7 +88,8 @@ func (tb *Bot) fileHTTPClient() *http.Client {
 	return directFileHTTP
 }
 
-// downloadLimited скачивает не больше max байт. Ссылка на файл Telegram содержит
+// downloadLimited скачивает файл не больше max байт; больший не обрезается, а
+// отклоняется с errFileTooLarge. Ссылка на файл Telegram содержит
 // токен бота, поэтому в ошибки она не попадает: их текст уходит в чат.
 func downloadLimited(ctx context.Context, client *http.Client, link string, max int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
@@ -91,7 +108,14 @@ func downloadLimited(ctx context.Context, client *http.Client, link string, max 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("ответ Telegram: HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, max))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, errFileTooLarge
+	}
+	return data, nil
 }
 
 func sniffMime(path string, data []byte) string {

@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -10,9 +11,17 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
+
+	"xray-status/internal/config"
+	"xray-status/internal/store"
+	"xray-status/internal/storetest"
 )
 
 // socks5Relay — минимальный SOCKS5 (без авторизации, только CONNECT): считает
@@ -154,5 +163,109 @@ func TestDownloadLimitedErrors(t *testing.T) {
 
 	if _, err := downloadLimited(context.Background(), directFileHTTP, "http://bad host/"+token, 1<<20); err == nil || strings.Contains(err.Error(), "SECRET") {
 		t.Fatalf("bad link error must not echo the link: %v", err)
+	}
+}
+
+// Файл больше лимита отклоняется целиком: обрезанная картинка — битый фавикон.
+func TestDownloadLimitedRejectsOversized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := strconv.Atoi(r.URL.Query().Get("n"))
+		_, _ = w.Write(bytes.Repeat([]byte{'x'}, n))
+	}))
+	defer srv.Close()
+
+	data, err := downloadLimited(context.Background(), directFileHTTP, srv.URL+"/?n=8", 8)
+	if err != nil || len(data) != 8 {
+		t.Fatalf("file of exactly max bytes must pass: len=%d err=%v", len(data), err)
+	}
+	if data, err := downloadLimited(context.Background(), directFileHTTP, srv.URL+"/?n=9", 8); !errors.Is(err, errFileTooLarge) {
+		t.Fatalf("expected errFileTooLarge, got len=%d err=%v", len(data), err)
+	}
+}
+
+// fakeTelegram — заглушка Bot API: считает вызовы методов, запоминает текст
+// последнего сообщения и отдаёт файл заданного размера.
+type fakeTelegram struct {
+	mu       sync.Mutex
+	calls    map[string]int
+	lastText string
+	fileBody []byte
+}
+
+func (f *fakeTelegram) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/file/") {
+		f.mu.Lock()
+		f.calls["download"]++
+		body := f.fileBody
+		f.mu.Unlock()
+		_, _ = w.Write(body)
+		return
+	}
+	method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+	f.mu.Lock()
+	f.calls[method]++
+	if txt := r.FormValue("text"); txt != "" {
+		f.lastText = txt
+	}
+	f.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	switch method {
+	case "deleteMessage":
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	case "getFile":
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"file_id":"f","file_path":"documents/fav.png"}}`))
+	default:
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":7}}`))
+	}
+}
+
+func TestFaviconUploadSizeLimit(t *testing.T) {
+	cases := []struct {
+		name      string
+		declared  int64 // размер из сообщения Telegram
+		body      int   // сколько байт реально отдаёт сервер файлов
+		saved     bool
+		getFile   int
+		download  int
+		wantInMsg string
+	}{
+		{"в пределах лимита", 4, 4, true, 1, 1, "Фавикон обновлён"},
+		{"заявленный размер больше лимита", faviconMaxBytes + 1, 4, false, 0, 0, "больше 1 МБ"},
+		{"реальный размер больше лимита", 0, faviconMaxBytes + 1, false, 1, 1, "больше 1 МБ"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st, err := store.Open(storetest.DSN(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			tg := &fakeTelegram{calls: map[string]int{}, fileBody: bytes.Repeat([]byte{'x'}, tc.body)}
+			srv := httptest.NewServer(tg)
+			defer srv.Close()
+			b, err := bot.New("1:T", bot.WithServerURL(srv.URL), bot.WithSkipGetMe())
+			if err != nil {
+				t.Fatal(err)
+			}
+			tb := &Bot{b: b, st: st, cfg: config.Config{TZ: "UTC"}, admins: map[int64]bool{1: true}}
+			_ = st.SetBotState(1, "await", "favicon")
+
+			tb.handleFaviconUpload(context.Background(), 1, &models.Message{
+				ID:       5,
+				Document: &models.Document{FileID: "f", MimeType: "image/png", FileSize: tc.declared},
+			})
+
+			if _, data, ok := st.GetAsset("favicon"); ok != tc.saved {
+				t.Fatalf("favicon saved=%v (%d bytes), want saved=%v", ok, len(data), tc.saved)
+			}
+			tg.mu.Lock()
+			defer tg.mu.Unlock()
+			if tg.calls["getFile"] != tc.getFile || tg.calls["download"] != tc.download {
+				t.Fatalf("getFile=%d download=%d, want %d/%d", tg.calls["getFile"], tg.calls["download"], tc.getFile, tc.download)
+			}
+			if !strings.Contains(tg.lastText, tc.wantInMsg) {
+				t.Fatalf("reply %q does not contain %q", tg.lastText, tc.wantInMsg)
+			}
+		})
 	}
 }
