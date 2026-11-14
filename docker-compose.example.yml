@@ -24,7 +24,8 @@ services:
       # --- базовое ---
       CHECKER_URL: "http://localhost:2112"
       TZ: "Europe/Moscow"
-      TITLE: "Статус серверов"
+      # TITLE: ""       # необяз.; пусто = «Статус серверов»/«Server status» по LOCALE
+      # SUBTITLE: ""    # необяз.; пусто = по LOCALE; заданные в боте тексты сохраняются
       # --- язык интерфейса: ru (по умолчанию) или en ---
       # LOCALE: "ru"      # ru (по умолчанию) или en
       # WEB_PASSWORD: ""      # включает HTTP Basic Auth для веб-UI; пусто = без пароля

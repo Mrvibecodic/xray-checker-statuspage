@@ -41,11 +41,13 @@ func TestTelegramProxy(t *testing.T) {
 }
 
 func TestLocaleAndWebAuthEnv(t *testing.T) {
-	for _, k := range []string{"LOCALE", "WEB_PASSWORD", "WEB_USER"} {
+	for _, k := range []string{"LOCALE", "WEB_PASSWORD", "WEB_USER", "TITLE", "SUBTITLE"} {
 		t.Setenv(k, "")
 	}
 	if c := Load(); c.Locale != "ru" || c.WebPassword != "" || c.WebUser != "" {
 		t.Fatalf("defaults: got locale=%q user=%q pwd-set=%v", c.Locale, c.WebUser, c.WebPassword != "")
+	} else if c.Title != "Статус серверов" || c.Subtitle != "Доступность серверов в реальном времени" {
+		t.Fatalf("RU default text: title=%q subtitle=%q", c.Title, c.Subtitle)
 	}
 	t.Setenv("LOCALE", "en")
 	t.Setenv("WEB_PASSWORD", "s3cret")
@@ -54,7 +56,20 @@ func TestLocaleAndWebAuthEnv(t *testing.T) {
 	if c.Locale != "en" || c.WebPassword != "s3cret" || c.WebUser != "admin" {
 		t.Fatalf("env not loaded: %+v", c)
 	}
+	if c.Title != "Server status" || c.Subtitle != "Real-time server availability" {
+		t.Fatalf("EN default text: title=%q subtitle=%q", c.Title, c.Subtitle)
+	}
 	if !IsEnglish(c.Locale) || IsEnglish("ru") {
 		t.Fatal("IsEnglish mismatch")
+	}
+}
+
+func TestExplicitTitleAndSubtitleOverrideLocale(t *testing.T) {
+	t.Setenv("LOCALE", "en")
+	t.Setenv("TITLE", "My servers")
+	t.Setenv("SUBTITLE", "Production checks")
+	c := Load()
+	if c.Title != "My servers" || c.Subtitle != "Production checks" {
+		t.Fatalf("explicit text overwritten: title=%q subtitle=%q", c.Title, c.Subtitle)
 	}
 }

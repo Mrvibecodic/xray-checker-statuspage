@@ -45,7 +45,8 @@ services:
       # --- базовое ---
       CHECKER_URL: "http://localhost:2112"
       TZ: "Europe/Moscow"
-      TITLE: "Статус серверов"
+      # TITLE: ""     # необяз.; пусто = «Статус серверов»/«Server status» по LOCALE
+      # SUBTITLE: ""  # необяз.; пусто = по LOCALE; заданные в боте тексты сохраняются
       # LOCALE: "ru"     # ru (по умолчанию) или en
       # WEB_PASSWORD: ""     # включает HTTP Basic Auth для веб-UI; пусто = без пароля
       # WEB_USER: ""     # необяз.; если задан — логин должен совпасть
@@ -206,8 +207,9 @@ TLS — обычным `certbot --nginx -d status.example.com`.
 | `BOT_ADMIN_IDS` | — | Chat id админов через запятую |
 | `NOTIFY_CHAT_IDS` | — | Чаты/группы/каналы для алертов; топик форума — `chatID:threadID` (прав на управление не дают) |
 | `CHECKER_URL` | `http://xray-checker:2112` | Адрес xray-checker (в host-сети — `http://localhost:2112`) |
-| `TZ` | `Europe/Moscow` | Часовой пояс (время и сводка) |
-| `TITLE` | `Статус серверов` | Заголовок страницы (меняется в боте) |
+| `TZ` | `Europe/Moscow` | Часовой пояс серверных дат и сводки; задаётся при старте (JS-часы — в поясе устройства) |
+| `TITLE` | ru: `Статус серверов`; en: `Server status` | Заголовок страницы (меняется в боте; явно заданное значение приоритетнее) |
+| `SUBTITLE` | ru: `Доступность серверов в реальном времени`; en: `Real-time server availability` | Подзаголовок страницы (меняется в боте; явно заданное значение приоритетнее) |
 | `PROXY_CHECK_INTERVAL` | `300` | **(на xray-checker)** частота проверок прокси, сек |
 | `TLS_MODE` | _(пусто → self-signed)_ | `off` / `file` (+`CERT_FILE`/`KEY_FILE`) / `letsencrypt` |
 | `DB_DRIVER`, `DB_DSN` | `sqlite` | БД: `postgres` + DSN для PostgreSQL |
