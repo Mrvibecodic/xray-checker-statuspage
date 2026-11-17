@@ -148,13 +148,19 @@ func Load() Config {
 	caps := splitList("CONTROL_CAPS")
 	days := atoi("DAYS", 30)
 	lang := getenv("LOCALE", "ru")
+	title := "Статус серверов"
+	subtitle := "Доступность серверов в реальном времени"
+	if IsEnglish(lang) {
+		title = "Server status"
+		subtitle = "Real-time server availability"
+	}
 	webPwd := getenv("WEB_PASSWORD", "")
 	webUser := getenv("WEB_USER", "")
 	defUpdateURL := "https://github.com/Mrvibecodic/xray-checker-statuspage/releases/download/go-build/statuspage-linux-" + runtime.GOARCH
 	return Config{
 		Port:            getenv("PORT", "80"),
-		Title:           getenv("TITLE", "Статус серверов"),
-		Subtitle:        getenv("SUBTITLE", "Доступность серверов в реальном времени"),
+		Title:           getenv("TITLE", title),
+		Subtitle:        getenv("SUBTITLE", subtitle),
 		Description:     getenv("DESCRIPTION", ""),
 		Days:            days,
 		TZ:              getenv("TZ", "Europe/Moscow"),
