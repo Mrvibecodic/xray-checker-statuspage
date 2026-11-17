@@ -58,7 +58,11 @@ func statusText(st *store.Store, cfg config.Config) string {
 	online := tot["online"].(int)
 	total := tot["total"].(int)
 	var b strings.Builder
-	fmt.Fprintf(&b, "<b>%s</b>\n", htmlEscape(cfg.Title))
+	title, _ := p["title"].(string)
+	if title == "" {
+		title = cfg.Title
+	}
+	fmt.Fprintf(&b, "<b>%s</b>\n", htmlEscape(title))
 	mark := "✅"
 	if online < total {
 		mark = "⚠️"

@@ -54,6 +54,21 @@ func TestStatusText(t *testing.T) {
 	if !strings.Contains(txt, "Онлайн: <b>1/2</b>") {
 		t.Errorf("status text wrong:\n%s", txt)
 	}
+	if !strings.Contains(txt, "<b>Стат</b>") {
+		t.Errorf("status header must fall back to cfg.Title:\n%s", txt)
+	}
+	if err := st.SetSetting("title", "Мой <статус>"); err != nil {
+		t.Fatal(err)
+	}
+	if txt := statusText(st, cfg); !strings.Contains(txt, "<b>Мой &lt;статус&gt;</b>") || strings.Contains(txt, "<b>Стат</b>") {
+		t.Errorf("status header must use title set in bot:\n%s", txt)
+	}
+	if err := st.SetSetting("title", ""); err != nil {
+		t.Fatal(err)
+	}
+	if txt := statusText(st, cfg); !strings.Contains(txt, "<b>Стат</b>") {
+		t.Errorf("empty title in bot must fall back to cfg.Title:\n%s", txt)
+	}
 	srv := serversText(st, cfg)
 	if !strings.Contains(srv, "Frankfurt") || !strings.Contains(srv, "🟢") {
 		t.Errorf("servers text wrong:\n%s", srv)
