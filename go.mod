@@ -7,7 +7,7 @@ require (
 	github.com/lib/pq v1.12.3
 	golang.org/x/crypto v0.59.0
 	golang.org/x/net v0.62.0
-	modernc.org/sqlite v1.62.0
+	modernc.org/sqlite v1.63.0
 )
 
 require (
